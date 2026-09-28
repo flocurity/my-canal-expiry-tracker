@@ -1,0 +1,29 @@
+{
+  "detail": {
+    "informations": {
+      "type": "VoD",
+      "contentID": "fiction_doc_50001",
+      "title": "Inside the Matrix",
+      "subtitle": "Doc. series",
+      "contentAvailability": {
+        "isInCatalog": true,
+        "isInOffer": true,
+        "availabilities": {
+          "download": {
+            "consumptionPlatform": "HAPI",
+            "isAvailable": true,
+            "isInOffer": true,
+            "availabilityEndDate": 1942696740000
+          },
+          "stream": {
+            "consumptionPlatform": "HAPI",
+            "isAvailable": true,
+            "isInOffer": true,
+            "label": "Dispo. plus de 3 mois"
+          },
+          "live": {"isInOffer": false, "isAvailable": false}
+        }
+      }
+    }
+  }
+}

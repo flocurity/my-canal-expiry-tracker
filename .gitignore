@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Personal playlist exports and generated tracker data
+input/
+cache/
+output/
+.DS_Store
+.idea/
+.vscode/

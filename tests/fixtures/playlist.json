@@ -1,0 +1,33 @@
+{
+  "currentPage": {"displayTemplate": "list"},
+  "contents": [
+    {
+      "type": "VoD",
+      "contentID": "fiction_50001",
+      "title": "The Last Compiler",
+      "subtitle": "Film Science-fiction",
+      "altLogoChannel": "CANAL+",
+      "isInOffer": true,
+      "onClick": {
+        "displayTemplate": "detailPage",
+        "displayName": "The Last Compiler",
+        "path": "/cinema/the-last-compiler/h/fiction_50001",
+        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/fiction/okapi/fiction_50001.json?detailType=detailPage&objectType=unit"
+      }
+    },
+    {
+      "type": "folder",
+      "contentID": "fiction_50002",
+      "title": "The Debugger - Saison 1",
+      "subtitle": "Episode 1 : Hello World",
+      "onClick": {
+        "displayTemplate": "detailSeason",
+        "parameters": [
+          {"in": "parameters", "id": "featureToggles", "enum": ["detailV5", "detailV5Sport", "registerProspect"]}
+        ],
+        "path": "/series/the-debugger/h/fiction_50002",
+        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/fiction/okapi/fiction_season_50002.json?detailType=detailSeason&objectType=season&brandID=fiction_50002"
+      }
+    }
+  ]
+}

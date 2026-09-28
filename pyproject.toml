@@ -1,0 +1,22 @@
+[project]
+name = "my-canal-expiry-tracker"
+version = "0.1.0"
+description = "Export manually retrieved myCANAL playlists with availability dates to Excel"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=3.0.6",
+    "requests>=2.34.2",
+    "structlog>=26.1.0",
+    "xlsxwriter>=3.2.9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = '-m "not integration"'
+markers = ["integration: explicitly enabled public myCANAL API smoke tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
