@@ -174,7 +174,8 @@ Close the workbook in Excel before regenerating it if your platform locks open f
 
 `Durée` prefers the current playlist's positive integer `duration` in milliseconds
 for `VoD` movies identified by a `Film ` subtitle. For example, `5880000` becomes
-`1 h 38 min`. Movie duration is formatted only when building the report; playlist
+`1 h 38 min`. Excel stores `Durée` numerically as minutes / 1440, with format
+`[h]" h "mm" min"`, so sums/subtotals work beyond 24 hours. Playlist
 duration is never copied into the detail cache. Whole minutes are used (any residual
 seconds are omitted); values below one minute are unusable for this display.
 
@@ -183,7 +184,7 @@ When playlist movie duration is missing/unusable, the verified detailV5 fallback
 may be cached as `duration_minutes`; it also identifies a movie when playlist category
 metadata is missing. A usable current playlist duration takes priority over this
 fallback. For example, 107 minutes becomes `1 h 47 min`, 60 becomes `1 h 00 min`,
-and 47 becomes `47 min`. Folder/series durations remain blank. No extra request is
+and 47 becomes `0 h 47 min`. Folder/series durations remain blank. No extra request is
 made for duration, and no episode aggregation is performed. Missing, non-integer,
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.

@@ -3,6 +3,8 @@ from datetime import date, timedelta
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
+import pytest
+
 from src.excel import build_dataframe, write_excel
 from src.tracker import ContentResult
 
@@ -106,17 +108,26 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
         assert sheet.find('.//m:c[@r="B3"]/m:v', NS) is None
 
 
-def test_new_presentation_columns_are_exported_as_text(tmp_path, item):
+def test_duration_is_numeric_and_availability_is_text(tmp_path, item):
     result = ContentResult(item, date(2026, 9, 30), 'OK', duration_minutes=107,
                            availability_text='mercredi 30 septembre 23h59')
     path = tmp_path / 'presentation.xlsx'
     frame = write_excel([result], path)
-    assert frame['Durée'].tolist() == ['1 h 47 min']
+    assert frame['Durée'].tolist() == [107 / 1440]
     assert frame["Disponible jusqu'au"].tolist() == ['mercredi 30 septembre 23h59']
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        for ref, expected in [('F2', '1 h 47 min'), ('E2', result.availability_text)]:
+        duration = sheet.find('.//m:c[@r="F2"]', NS)
+        assert duration.attrib.get('t', 'n') == 'n'
+        assert float(duration.find('m:v', NS).text) == pytest.approx(107 / 1440)
+        styles = ET.fromstring(book.read('xl/styles.xml'))
+        style = styles.find('m:cellXfs', NS)[int(duration.attrib['s'])]
+        number_format = styles.find(
+            f'm:numFmts/m:numFmt[@numFmtId="{style.attrib["numFmtId"]}"]', NS,
+        )
+        assert number_format.attrib['formatCode'] == '[h]" h "mm" min"'
+        for ref, expected in [('E2', result.availability_text)]:
             cell = sheet.find(f'.//m:c[@r="{ref}"]', NS)
             assert cell.attrib['t'] == 's'
             assert ''.join(strings[int(cell.find('m:v', NS).text)].itertext()) == expected
@@ -127,7 +138,7 @@ def test_playlist_duration_has_priority_and_folders_stay_empty(item):
     folder = replace(movie, content_type='folder')
     results = [ContentResult(movie, None, 'Date inconnue', duration_minutes=133),
                ContentResult(folder, None, 'Date inconnue', duration_minutes=133)]
-    assert build_dataframe(results)['Durée'].tolist() == ['1 h 38 min', '']
+    assert build_dataframe(results)['Durée'].tolist() == [98 / 1440, '']
 
 
 def test_non_movie_playlist_duration_is_not_used(item):

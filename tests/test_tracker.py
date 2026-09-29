@@ -140,14 +140,14 @@ def test_v5_duration_and_availability_survive_cache(tmp_path, item, fixture_data
     path = tmp_path / 'details.json'
     first = process_items([item], client, DetailCache(path))
     assert first[0].duration_minutes == 98
-    assert build_dataframe(first)['Durée'].iloc[0] == '1 h 38 min'
+    assert build_dataframe(first)['Durée'].iloc[0] == 98 / 1440
     assert first[0].availability_text == 'samedi 9 octobre 23h59'
     assert process_items([item], client, DetailCache(path)) == first
     client.fetch.assert_called_once()
 
 
-@pytest.mark.parametrize('minutes, expected', [(107, '1 h 47 min'), (133, '2 h 13 min'),
-                                               (60, '1 h 00 min'), (47, '47 min')])
+@pytest.mark.parametrize('minutes, expected', [(107, 107 / 1440), (133, 133 / 1440),
+                                               (60, 60 / 1440), (47, 47 / 1440)])
 def test_movie_duration(minutes, expected, fixture_data, item):
     from src.tracker import extract_duration
     payload = fixture_data('detail_movie_v5.json')
@@ -219,7 +219,7 @@ def test_vicious_token_change_reuses_fresh_enrichment(tmp_path, item, fixture_da
     assert frame['Titre'].iloc[0] == 'Current title'
     assert frame['Service'].iloc[0] == 'Current service'
     assert frame["Dans l'offre"].iloc[0] == 'Non'
-    assert frame['Durée'].iloc[0] == '1 h 38 min'
+    assert frame['Durée'].iloc[0] == 98 / 1440
     assert 'https://' not in path.read_text()
     assert 'a' * 32 not in path.read_text()
     assert 'b' * 32 not in path.read_text()
@@ -323,11 +323,11 @@ def test_playlist_duration_does_not_enter_cache(tmp_path, item, fixture_data):
     client.fetch.return_value = fixture_data('detail_movie_v5.json')
     path = tmp_path / 'details.json'
     first = process_items([item], client, DetailCache(path))
-    assert build_dataframe(first)['Durée'].iloc[0] == '1 h 38 min'
+    assert build_dataframe(first)['Durée'].iloc[0] == 98 / 1440
     assert set(json.loads(path.read_text())[item.content_id]) == {
         'retrieved_at', 'availability_end_date', 'subgenre',
     }
     updated = replace(item, duration_ms=7980000)
     second = process_items([updated], client, DetailCache(path))
-    assert build_dataframe(second)['Durée'].iloc[0] == '2 h 13 min'
+    assert build_dataframe(second)['Durée'].iloc[0] == 133 / 1440
     client.fetch.assert_called_once()

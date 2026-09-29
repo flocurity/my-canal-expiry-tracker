@@ -20,7 +20,7 @@ DAYS_FORMULA = (
 )
 
 
-def format_duration(result: ContentResult) -> str:
+def excel_duration(result: ContentResult) -> float | str:
     item = result.item
     if item.content_type == 'folder':
         return ''
@@ -33,8 +33,7 @@ def format_duration(result: ContentResult) -> str:
             minutes = item.duration_ms // 60_000
     if minutes is None or minutes <= 0:
         return ''
-    hours, minutes = divmod(minutes, 60)
-    return f'{hours} h {minutes:02d} min' if hours else f'{minutes} min'
+    return minutes / 1440
 
 
 def build_dataframe(results: list[ContentResult], today: date | None = None) -> pd.DataFrame:
@@ -48,7 +47,7 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
             'Service': item.service,
             'Jours restants': days_remaining(result.expiration, today),
             "Disponible jusqu'au": result.availability_text,
-            'Durée': format_duration(result),
+            'Durée': excel_duration(result),
             'Catégorie': item.subtitle,
             "Dans l'offre": None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
             'URL myCANAL': item.web_url,
@@ -78,7 +77,9 @@ def write_excel(
         integer_format = workbook.add_format({'num_format': '0'})
         columns = [{'header': name} for name in COLUMNS]
         days_column = COLUMNS.index('Jours restants')
-        formats = {'Fin de disponibilité': date_format, 'Jours restants': integer_format}
+        duration_format = workbook.add_format({'num_format': '[h]" h "mm" min"'})
+        formats = {'Fin de disponibilité': date_format, 'Jours restants': integer_format,
+                   'Durée': duration_format}
         for name, fmt in formats.items():
             columns[COLUMNS.index(name)]['format'] = fmt
         columns[days_column]['formula'] = DAYS_FORMULA
@@ -96,7 +97,7 @@ def write_excel(
         sheet.freeze_panes(1, 0)
         for column, name in enumerate(COLUMNS):
             lengths = [len(name), *(len(str(value)) for value in frame[name] if pd.notna(value))]
-            width = min(55, max(lengths) + 2)
+            width = 15 if name == 'Durée' else min(55, max(lengths) + 2)
             sheet.set_column(column, column, width, formats.get(name),
                              {'hidden': name == 'Content ID'})
         for row, url in enumerate(frame['URL myCANAL'], start=1):
