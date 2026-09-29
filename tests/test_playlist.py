@@ -92,3 +92,13 @@ def test_invalid_or_unsupported_parameters(tmp_path, fixture_data, parameters):
     item = load_playlist(tmp_path)[0]
     assert item.supports_detail_v5 is False
     assert item.detail_url == raw['onClick']['URLPage']
+
+
+@pytest.mark.parametrize('duration, expected', [(5880000, 5880000), (None, None),
+                                               (True, None), ('5880000', None),
+                                               (-1, None), (0, None), (1.5, None)])
+def test_playlist_duration_milliseconds(tmp_path, fixture_data, duration, expected):
+    data = fixture_data('playlist.json')
+    data['contents'][0]['duration'] = duration
+    (tmp_path / 'page.json').write_text(json.dumps(data))
+    assert load_playlist(tmp_path)[0].duration_ms == expected

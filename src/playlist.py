@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from log import get_logger
 
@@ -25,6 +25,25 @@ class PlaylistItem:
     path: str
     detail_url: str
     supports_detail_v5: bool = False
+    duration_ms: int | None = None
+
+    @property
+    def movie_duration_minutes(self) -> int | None:
+        if (self.content_type == 'VoD' and self.subtitle.casefold().startswith('film ')
+                and self.duration_ms is not None and self.duration_ms >= 60_000):
+            return self.duration_ms // 60_000
+        return None
+
+    @property
+    def season_content_id(self) -> str:
+        # A playlist brand ID can point to different seasons across exports.
+        try:
+            parsed = urlsplit(self.detail_url)
+            if parse_qs(parsed.query).get('detailType') == ['detailSeason']:
+                return Path(parsed.path).stem
+        except ValueError:
+            pass
+        return ''
 
     @property
     def web_url(self) -> str:
@@ -97,6 +116,7 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
             if content_id:
                 seen.add(content_id)
             in_offer = raw.get('isInOffer')
+            duration = raw.get('duration')
             items.append(PlaylistItem(
                 content_id=content_id,
                 title=_text(raw.get('title')),
@@ -107,6 +127,8 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
                 path=_text(click.get('path')),
                 detail_url=click['URLPage'],
                 supports_detail_v5=_declares_detail_v5(click.get('parameters')),
+                duration_ms=(duration if isinstance(duration, int)
+                             and not isinstance(duration, bool) and duration > 0 else None),
             ))
     log.info('playlist_loaded', files=len(paths), items=len(items))
     return items

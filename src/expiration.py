@@ -40,13 +40,32 @@ def extract_expiration(payload: object) -> date | None:
     return extract_availability(payload)[0]
 
 
+def availability_from_raw(
+    timestamp: int | float | None, label: str = '',
+) -> tuple[date | None, str]:
+    value = _timestamp_datetime(timestamp)
+    if value is not None:
+        return value.date(), _availability_text(value)
+    match = _LABEL_DATE.search(label)
+    if match:
+        try:
+            return datetime.strptime(match.group(1), '%d/%m/%Y').date(), ''
+        except ValueError:
+            pass
+    return None, ''
+
+
 def extract_availability(payload: object) -> tuple[date | None, str]:
-    """Select one canonical expiration, retaining its absolute Paris time label."""
+    return availability_from_raw(*extract_raw_availability(payload))
+
+
+def extract_raw_availability(payload: object) -> tuple[int | float | None, str]:
+    """Keep the selected timestamp, or a dated API label when no timestamp exists."""
     if not isinstance(payload, dict) or not isinstance(payload.get('detail'), dict):
         raise ValueError('Missing or invalid detail object')
-    result = _timestamp_datetime(payload['detail'].get('availabilityEndDate'))
-    if result is not None:
-        return result.date(), _availability_text(result)
+    timestamp = payload['detail'].get('availabilityEndDate')
+    if _timestamp_datetime(timestamp) is not None:
+        return timestamp, ''
     info = payload['detail'].get('informations')
     if not isinstance(info, dict):
         return None, ''
@@ -61,9 +80,9 @@ def extract_availability(payload: object) -> tuple[date | None, str]:
     ordered.extend(value for key, value in options.items() if key not in ('download', 'stream'))
     for option in ordered:
         if isinstance(option, dict):
-            result = _timestamp_datetime(option.get('availabilityEndDate'))
-            if result is not None:
-                return result.date(), _availability_text(result)
+            timestamp = option.get('availabilityEndDate')
+            if _timestamp_datetime(timestamp) is not None:
+                return timestamp, ''
 
     # Exact timestamps take precedence over the less precise display labels.
     for option in [options.get('stream'), *ordered]:
@@ -72,7 +91,8 @@ def extract_availability(payload: object) -> tuple[date | None, str]:
         match = _LABEL_DATE.search(option['label'])
         if match:
             try:
-                return datetime.strptime(match.group(1), '%d/%m/%Y').date(), ''
+                datetime.strptime(match.group(1), '%d/%m/%Y')
+                return None, match.group(0)
             except ValueError:
                 continue
     return None, ''

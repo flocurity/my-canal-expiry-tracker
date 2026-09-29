@@ -18,6 +18,23 @@ DAYS_FORMULA = (
 )
 
 
+def format_duration(result: ContentResult) -> str:
+    item = result.item
+    if item.content_type == 'folder':
+        return ''
+    # Playlist duration is current; the verified detail movie duration is a fallback.
+    minutes = item.movie_duration_minutes
+    if minutes is None:
+        minutes = result.duration_minutes
+        if (minutes is not None and item.content_type == 'VoD'
+                and item.duration_ms is not None and item.duration_ms >= 60_000):
+            minutes = item.duration_ms // 60_000
+    if minutes is None or minutes <= 0:
+        return ''
+    hours, minutes = divmod(minutes, 60)
+    return f'{hours} h {minutes:02d} min' if hours else f'{minutes} min'
+
+
 def build_dataframe(results: list[ContentResult], today: date | None = None) -> pd.DataFrame:
     today = today or paris_today()
     records = []
@@ -27,7 +44,7 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
             item.title, item.subtitle, result.subgenre, item.service, result.expiration,
             days_remaining(result.expiration, today),
             None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
-            item.web_url, item.content_id, result.status, result.duration, result.availability_text,
+            item.web_url, item.content_id, result.status, format_duration(result), result.availability_text,
         ])
     frame = pd.DataFrame(records, columns=COLUMNS)
     frame['Jours restants'] = pd.array(frame['Jours restants'], dtype='Int64')

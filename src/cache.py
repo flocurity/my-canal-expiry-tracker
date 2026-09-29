@@ -1,12 +1,14 @@
-"""A URL-bound JSON cache of successful extracted availability information."""
+"""A content-keyed JSON cache of raw detail enrichment."""
 
 import json
 import os
 import tempfile
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from log import get_logger
+from src.detail import DetailData
+from src.expiration import availability_from_raw
 
 log = get_logger(__name__)
 CACHE_LIFETIME = timedelta(hours=24)
@@ -22,50 +24,84 @@ class DetailCache:
             data = json.loads(path.read_text(encoding='utf-8'))
             if not isinstance(data, dict):
                 raise ValueError('Cache must contain an object')
-            self.entries = data
+            # Legacy presentation-only entries cannot recover an exact timestamp.
+            # Whitelist fields so obsolete URLs and metadata never survive a save.
+            for content_id, entry in data.items():
+                normalized = self._normalize_entry(entry)
+                if normalized is not None:
+                    self.entries[content_id] = normalized
+            self.dirty = self.entries != data
         except FileNotFoundError:
             pass
         except (OSError, ValueError) as exc:
             log.warning('cache_read_failed', path=str(path), reason=str(exc))
 
-    def get(self, content_id: str, url: str) -> tuple[bool, date | None, str, str, str]:
-        entry = self.entries.get(content_id)
-        if not content_id or not isinstance(entry, dict):
-            return False, None, '', '', ''
+    @staticmethod
+    def _normalize_entry(entry: object) -> dict | None:
+        if not isinstance(entry, dict) or 'availability_end_date' not in entry:
+            return None
+        timestamp = entry['availability_end_date']
+        if timestamp is not None and availability_from_raw(timestamp)[0] is None:
+            return None
+        label = entry.get('availability_label', '')
+        if not isinstance(label, str):
+            return None
+        if label and availability_from_raw(None, label)[0] is None:
+            return None
+        subgenre = entry.get('subgenre', '')
+        if not isinstance(subgenre, str) or not subgenre.strip():
+            subgenre = ''
+        minutes = entry.get('duration_minutes')
+        if (isinstance(minutes, bool) or not isinstance(minutes, int)
+                or minutes <= 0):
+            minutes = None
+        season_id = entry.get('season_content_id', '')
+        if not isinstance(season_id, str):
+            return None
+        normalized = {
+            'retrieved_at': entry.get('retrieved_at'),
+            'availability_end_date': timestamp,
+            'subgenre': subgenre,
+        }
+        if label and timestamp is None:
+            normalized['availability_label'] = label
+        if minutes is not None:
+            normalized['duration_minutes'] = minutes
+        if season_id:
+            normalized['season_content_id'] = season_id
+        return normalized
+
+    def get(self, content_id: str, season_content_id: str = '') -> DetailData | None:
+        entry = self._normalize_entry(self.entries.get(content_id))
+        if not content_id or entry is None:
+            return None
         try:
             retrieved = datetime.fromisoformat(entry['retrieved_at'])
             age = datetime.now(timezone.utc) - retrieved
-            if not timedelta(0) <= age < self.lifetime or entry['url'] != url:
-                return False, None, '', '', ''
-            raw_date = entry['expiration']
-            expiration = date.fromisoformat(raw_date) if raw_date is not None else None
-            if entry['status'] != ('OK' if expiration else 'Date inconnue'):
-                return False, None, '', '', ''
-            # Older cache entries remain usable without an additional API call.
-            subgenre = entry.get('subgenre')
-            if not isinstance(subgenre, str) or not subgenre.strip():
-                subgenre = ''
-            duration = entry.get('duration', '')
-            availability_text = entry.get('availability_text', '')
-            return (True, expiration, subgenre,
-                    duration if isinstance(duration, str) else '',
-                    availability_text if isinstance(availability_text, str) else '')
+            if (not timedelta(0) <= age < self.lifetime
+                    or entry.get('season_content_id', '') != season_content_id):
+                return None
+            return DetailData(
+                availability_end_date=entry['availability_end_date'],
+                availability_label=entry.get('availability_label', ''),
+                subgenre=entry['subgenre'],
+                duration_minutes=entry.get('duration_minutes'),
+            )
         except (KeyError, ValueError, TypeError):
-            return False, None, '', '', ''
+            return None
 
-    def put(self, content_id: str, url: str, expiration: date | None,
-            subgenre: str = '', duration: str = '', availability_text: str = '') -> None:
+    def put(self, content_id: str, detail: DetailData,
+            season_content_id: str = '') -> None:
         if not content_id:
             return
-        self.entries[content_id] = {
+        self.entries[content_id] = self._normalize_entry({
             'retrieved_at': datetime.now(timezone.utc).isoformat(),
-            'url': url,
-            'expiration': expiration.isoformat() if expiration else None,
-            'subgenre': subgenre,
-            'duration': duration,
-            'availability_text': availability_text,
-            'status': 'OK' if expiration else 'Date inconnue',
-        }
+            'availability_end_date': detail.availability_end_date,
+            'availability_label': detail.availability_label,
+            'subgenre': detail.subgenre,
+            'duration_minutes': detail.duration_minutes,
+            'season_content_id': season_content_id,
+        })
         self.dirty = True
 
     def save(self) -> None:

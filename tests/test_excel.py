@@ -94,7 +94,7 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
 
 
 def test_new_presentation_columns_are_exported_as_text(tmp_path, item):
-    result = ContentResult(item, date(2026, 9, 30), 'OK', duration='1 h 47 min',
+    result = ContentResult(item, date(2026, 9, 30), 'OK', duration_minutes=107,
                            availability_text='mercredi 30 septembre 23h59')
     path = tmp_path / 'presentation.xlsx'
     frame = write_excel([result], path)
@@ -103,7 +103,20 @@ def test_new_presentation_columns_are_exported_as_text(tmp_path, item):
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        for ref, expected in [('K2', result.duration), ('L2', result.availability_text)]:
+        for ref, expected in [('K2', '1 h 47 min'), ('L2', result.availability_text)]:
             cell = sheet.find(f'.//m:c[@r="{ref}"]', NS)
             assert cell.attrib['t'] == 's'
             assert ''.join(strings[int(cell.find('m:v', NS).text)].itertext()) == expected
+
+
+def test_playlist_duration_has_priority_and_folders_stay_empty(item):
+    movie = replace(item, duration_ms=5880000)
+    folder = replace(movie, content_type='folder')
+    results = [ContentResult(movie, None, 'Date inconnue', duration_minutes=133),
+               ContentResult(folder, None, 'Date inconnue', duration_minutes=133)]
+    assert build_dataframe(results)['Durée'].tolist() == ['1 h 38 min', '']
+
+
+def test_non_movie_playlist_duration_is_not_used(item):
+    documentary = replace(item, subtitle='Doc. Nature', duration_ms=5880000)
+    assert build_dataframe([ContentResult(documentary, None, 'Date inconnue')])['Durée'].iloc[0] == ''

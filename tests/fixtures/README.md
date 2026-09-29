@@ -32,3 +32,12 @@ inspected on 2026-09-29. The title is fictional. The observed `detail.genre` was
 `Cinéma`, `detail.duration` was the integer `98`, and `detail.editorialTitle`
 contained `1h38`, confirming minutes. The timestamp and relevant metadata retain
 the observed values. No legacy duration field or series duration was inferred.
+
+
+The movie in `playlist.json` now includes the observed playlist `duration` shape:
+integer milliseconds, with 5880000 representing 98 minutes. Local exports on
+2026-09-29 contained this field for all observed `Film` items and no duration on
+folders. The field also occurs on some non-movie VoD items, so duration alone does
+not classify a movie. The detailV5 fixture remains the verified fallback when
+playlist movie duration is absent. Cache token regression tests use fictional
+same-shape tokens; they never call the network or persist request URLs in cache.

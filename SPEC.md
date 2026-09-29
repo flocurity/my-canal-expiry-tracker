@@ -95,6 +95,7 @@ Keep at least the following fields for each item:
 - `type`
 - `altLogoChannel`
 - `isInOffer`
+- raw `duration` in milliseconds when present and usable
 - `onClick.path`
 - `onClick.URLPage`
 - whether `onClick.parameters` declares `detailV5` in a string-array `enum` for
@@ -247,8 +248,8 @@ Build a pandas DataFrame ideally containing the following columns:
 when the first value is missing, null, non-string, empty or whitespace-only.
 Preserve the selected string unchanged; if neither is usable, keep it empty.
 It may duplicate `Catégorie`, which
-continues to use playlist metadata. Cache this value with the extracted date;
-older cache entries without it remain valid and export an empty value.
+continues to use playlist metadata. Cache this value with the raw timestamp;
+raw cache entries without this optional field remain valid and export an empty value.
 
 `Service` corresponds to `altLogoChannel`.
 
@@ -264,12 +265,21 @@ For `URL myCANAL`, prefer a user-facing URL built from `onClick.path` if this pr
 
 ### Duration and absolute availability text
 
-`Durée` uses the observed detailV5 `detail.duration` integer in minutes only when
-`detail.genre` is `Cinéma`. For example, 107 becomes `1 h 47 min`; 60 becomes
-`1 h 00 min`, and 47 becomes `47 min`. Series and unrecognized schemas stay blank;
-no episode aggregation or additional duration requests are made. Missing, non-integer,
-boolean and nonpositive durations stay blank. Legacy duration fields have not been
-verified and are not guessed.
+`Durée` prefers the current playlist's positive integer `duration` in milliseconds
+for `VoD` movies identified by a `Film ` subtitle. For example, `5880000` becomes
+`1 h 38 min`. Movie duration is formatted only when building the report; playlist
+duration is never copied into the detail cache. Whole minutes are used (any residual
+seconds are omitted); values below one minute are unusable for this display.
+
+When playlist movie duration is missing/unusable, the verified detailV5 fallback is
+`detail.duration` in integer minutes with `detail.genre == "Cinéma"`. That raw value
+may be cached as `duration_minutes`; it also identifies a movie when playlist category
+metadata is missing. A usable current playlist duration takes priority over this
+fallback. For example, 107 minutes becomes `1 h 47 min`, 60 becomes `1 h 00 min`,
+and 47 becomes `47 min`. Folder/series durations remain blank. No extra request is
+made for duration, and no episode aggregation is performed. Missing, non-integer,
+boolean and nonpositive values are unusable. Unverified legacy duration fields are
+not guessed.
 
 `Disponible jusqu’au` uses the same canonical timestamp selected for the date,
 interpreted as Unix milliseconds and explicitly converted to `Europe/Paris`.
@@ -280,8 +290,10 @@ Relative API labels are never copied. Without a valid timestamp, including a
 label-only date fallback, this field stays blank. `Fin de disponibilité` remains
 a real Excel date.
 
-Both new fields are cached alongside the date. Older cache entries remain valid
-and leave these fields blank until normal expiry or `--refresh`.
+The Excel date, absolute availability text and status are derived at runtime from
+raw enrichment on both fresh fetches and cache hits. The playlist supplies current
+titles, categories, service, offer membership, paths, URLs and duration. None of
+that playlist metadata is duplicated into the detail cache.
 
 ## Sorting
 
@@ -386,19 +398,28 @@ For example:
     cache/
     └── details.json
 
-The cache may be indexed by `contentID`.
+`cache/details.json` is keyed by playlist `contentID` and keeps raw detail enrichment
+for 24 hours. URL, Hodor-token and feature-toggle changes alone do not invalidate
+fresh entries. A `detailSeason` additionally records `season_content_id`, the stable
+endpoint season ID: real playlists use a brand ID as `contentID` while linking to
+a particular season. Changing the season, or switching between show and season,
+requires a fetch. No other query parameters participate in cache identity.
 
-Store:
+Entries contain `retrieved_at`, the canonical `availability_end_date` Unix timestamp
+in milliseconds (or null), and `subgenre`. Optional `availability_label` retains only
+the dated API label fallback when no timestamp exists; it is never a relative label
+or a generated display string. Optional `duration_minutes` retains the verified raw
+detail movie duration only when playlist movie duration is unavailable. No URLs,
+tokens, playlist metadata, formatted dates/durations, days remaining or derived
+statuses are stored.
 
-- retrieval date/time;
-- useful response data or extracted information;
-- extracted expiration date.
-
-Use a configurable cache lifetime, for example 24 hours.
-
-Bind cache entries to the effective request URL, including feature toggles. A legacy
-URL must not satisfy a newly requested `detailV5` representation. Existing cache
-entries remain usable when their URL still matches; TTL and refresh rules stay unchanged.
+Missing/expired entries and `--refresh` fetch using the **current playlist URL**,
+including the existing detailV5 request handling. Successful fetches replace the
+entry; HTTP/parsing failures are not cached and leave any previous raw entry intact.
+Old presentation-only entries cannot reconstruct the canonical timestamp and are
+treated as misses. Loading drops incompatible entries and strips obsolete fields;
+the next cache save persists the cleaned format, including for unvisited entries.
+This causes a one-time refetch for old entries. Corrupt entries remain safe misses.
 
 Add a CLI option to ignore the cache:
 
