@@ -137,10 +137,14 @@ The regenerated file is `output/ma-liste-canal.xlsx`, with one `Ma liste` sheet:
 - French date formatting (`dd/mm/yyyy`), integer days remaining and clickable links.
 - Content IDs retained in a hidden column, and `Oui`/`Non` offer membership.
 - Soonest availability dates first, with unknown dates and errors at the end.
-- Entire rows colored red for past dates or 0–2 days, orange for 3–7 days,
-  yellow for 8–30 days, and no urgency color beyond 30 days or for unknown dates.
+- Entire rows use dark gray with light gray text for expired content (< 0 days),
+  dark red with white text for the last day (0), red for 1–2 days, orange for
+  3–7 days and yellow for 8–30 days. Values above 30, blank or non-numeric
+  values retain normal Table formatting.
 
-The first columns are `Titre`, `Catégorie`, `Sous-genre`, `Service`.
+Column order: `Titre`, `Sous-genre`, `Service`, `Jours restants`,
+`Disponible jusqu'au`, `Durée`, `Catégorie`, `Dans l'offre`, `URL myCANAL`,
+`Content ID` (hidden), `Fin de disponibilité`, `Statut`.
 `Catégorie` still comes from playlist metadata. `Sous-genre` uses `detail.subgenre`
 first, falling back to `tracking.dataLayer.subgenre` when the first value is missing,
 null, non-string, empty or whitespace-only. The selected string is preserved unchanged,
@@ -184,7 +188,7 @@ made for duration, and no episode aggregation is performed. Missing, non-integer
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.
 
-`Disponible jusqu’au` uses the same canonical timestamp selected for the date,
+`Disponible jusqu'au` uses the same canonical timestamp selected for the date,
 interpreted as Unix milliseconds and explicitly converted to `Europe/Paris`.
 French weekday/month names are independent of system locale; the label has no year
 and uses a 24-hour clock with `h` (for example `mercredi 30 septembre 23h59`).

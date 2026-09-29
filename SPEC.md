@@ -230,17 +230,17 @@ Do not use the myCANAL `lastDays` field to determine urgency. It appears much to
 Build a pandas DataFrame ideally containing the following columns:
 
 - `Titre`
-- `Catégorie`
 - `Sous-genre`
 - `Service`
-- `Fin de disponibilité`
 - `Jours restants`
+- `Disponible jusqu'au`
+- `Durée`
+- `Catégorie`
 - `Dans l'offre`
 - `URL myCANAL`
-- `Content ID`
+- `Content ID` (hidden)
+- `Fin de disponibilité`
 - `Statut`
-- `Durée`
-- `Disponible jusqu’au`
 
 `Catégorie` may use `subtitle` when available.
 
@@ -281,7 +281,7 @@ made for duration, and no episode aggregation is performed. Missing, non-integer
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.
 
-`Disponible jusqu’au` uses the same canonical timestamp selected for the date,
+`Disponible jusqu'au` uses the same canonical timestamp selected for the date,
 interpreted as Unix milliseconds and explicitly converted to `Europe/Paris`.
 French weekday/month names are independent of system locale; the label has no year
 and uses a 24-hour clock with `h` (for example `mercredi 30 septembre 23h59`).
@@ -357,10 +357,12 @@ Apply formatting to the entire row based on `Jours restants`.
 
 The ranges must be mutually exclusive:
 
-- <= 2 days, including zero and negative values: red
+- < 0 days (expired): very dark gray background, light gray text
+- 0 days (last day): dark red background, white text
+- 1 to 2 days inclusive: red
 - 3 to 7 days inclusive: orange
 - 8 to 30 days inclusive: yellow
-- more than 30 days: no special color
+- more than 30 days, blank or non-numeric: normal Table formatting
 
 Do not color items with an unknown expiration date.
 

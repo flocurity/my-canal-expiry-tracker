@@ -4,12 +4,14 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+from xlsxwriter.utility import xl_col_to_name
 
 from src.expiration import days_remaining, paris_today
 from src.tracker import ContentResult
 
-COLUMNS = ['Titre', 'Catégorie', 'Sous-genre', 'Service', 'Fin de disponibilité', 'Jours restants',
-           "Dans l'offre", 'URL myCANAL', 'Content ID', 'Statut', 'Durée', 'Disponible jusqu’au']
+COLUMNS = ['Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
+           'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
+           'Fin de disponibilité', 'Statut']
 
 
 DAYS_FORMULA = (
@@ -40,12 +42,20 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
     records = []
     for result in results:
         item = result.item
-        records.append([
-            item.title, item.subtitle, result.subgenre, item.service, result.expiration,
-            days_remaining(result.expiration, today),
-            None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
-            item.web_url, item.content_id, result.status, format_duration(result), result.availability_text,
-        ])
+        records.append({
+            'Titre': item.title,
+            'Sous-genre': result.subgenre,
+            'Service': item.service,
+            'Jours restants': days_remaining(result.expiration, today),
+            "Disponible jusqu'au": result.availability_text,
+            'Durée': format_duration(result),
+            'Catégorie': item.subtitle,
+            "Dans l'offre": None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
+            'URL myCANAL': item.web_url,
+            'Content ID': item.content_id,
+            'Fin de disponibilité': result.expiration,
+            'Statut': result.status,
+        })
     frame = pd.DataFrame(records, columns=COLUMNS)
     frame['Jours restants'] = pd.array(frame['Jours restants'], dtype='Int64')
     return frame.sort_values(['Fin de disponibilité', 'Jours restants'], na_position='last',
@@ -67,9 +77,11 @@ def write_excel(
         date_format = workbook.add_format({'num_format': 'dd/mm/yyyy'})
         integer_format = workbook.add_format({'num_format': '0'})
         columns = [{'header': name} for name in COLUMNS]
-        columns[4]['format'] = date_format
-        columns[5]['format'] = integer_format
-        columns[5]['formula'] = DAYS_FORMULA
+        days_column = COLUMNS.index('Jours restants')
+        formats = {'Fin de disponibilité': date_format, 'Jours restants': integer_format}
+        for name, fmt in formats.items():
+            columns[COLUMNS.index(name)]['format'] = fmt
+        columns[days_column]['formula'] = DAYS_FORMULA
         # Excel requires at least one data row even for an empty playlist table.
         last_row = max(1, len(frame))
         sheet.add_table(0, 0, last_row, len(COLUMNS) - 1, {
@@ -77,28 +89,32 @@ def write_excel(
         })
         # Supply useful cached previews; Excel recalculates the formula on opening.
         for row, value in enumerate(frame['Jours restants'], start=1):
-            sheet.write_formula(row, 5, DAYS_FORMULA, integer_format,
+            sheet.write_formula(row, days_column, DAYS_FORMULA, integer_format,
                                 '' if pd.isna(value) else int(value))
         if frame.empty:
-            sheet.write_formula(1, 5, DAYS_FORMULA, integer_format, '')
+            sheet.write_formula(1, days_column, DAYS_FORMULA, integer_format, '')
         sheet.freeze_panes(1, 0)
         for column, name in enumerate(COLUMNS):
             lengths = [len(name), *(len(str(value)) for value in frame[name] if pd.notna(value))]
             width = min(55, max(lengths) + 2)
-            fmt = date_format if column == 4 else integer_format if column == 5 else None
-            sheet.set_column(column, column, width, fmt, {'hidden': column == 8})
+            sheet.set_column(column, column, width, formats.get(name),
+                             {'hidden': name == 'Content ID'})
         for row, url in enumerate(frame['URL myCANAL'], start=1):
             if isinstance(url, str) and url.startswith('https://') and len(url) <= 2079:
-                sheet.write_url(row, 7, url)
+                sheet.write_url(row, COLUMNS.index('URL myCANAL'), url)
         if len(frame):
+            days = f'${xl_col_to_name(days_column)}2'
             rules = [
-                ('AND(ISNUMBER($F2),$F2<=2)', '#FFC7CE'),
-                ('AND(ISNUMBER($F2),$F2>=3,$F2<=7)', '#F4B183'),
-                ('AND(ISNUMBER($F2),$F2>=8,$F2<=30)', '#FFEB9C'),
+                (f'{days}<0', {'bg_color': '#333333', 'font_color': '#D9D9D9'}),
+                (f'{days}=0', {'bg_color': '#9C0006', 'font_color': '#FFFFFF'}),
+                (f'{days}>=1,{days}<=2', {'bg_color': '#FFC7CE'}),
+                (f'{days}>=3,{days}<=7', {'bg_color': '#F4B183'}),
+                (f'{days}>=8,{days}<=30', {'bg_color': '#FFEB9C'}),
             ]
-            for formula, color in rules:
+            for condition, style in rules:
+                formula = f'AND(ISNUMBER({days}),{condition})'
                 sheet.conditional_format(1, 0, len(frame), len(COLUMNS) - 1, {
                     'type': 'formula', 'criteria': '=' + formula,
-                    'format': workbook.add_format({'bg_color': color}),
+                    'format': workbook.add_format(style),
                 })
     return frame

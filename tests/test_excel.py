@@ -35,29 +35,42 @@ def test_excel_native_features_and_untrusted_text(tmp_path, item):
         assert sheet.find('m:sheetViews/m:sheetView/m:pane', NS).attrib['ySplit'] == '1'
         assert sheet.find('m:conditionalFormatting', NS).attrib['sqref'] == 'A2:L10'
         formulas = [e.text for e in sheet.findall('.//m:cfRule/m:formula', NS)]
-        assert formulas == ['AND(ISNUMBER($F2),$F2<=2)',
-                            'AND(ISNUMBER($F2),$F2>=3,$F2<=7)',
-                            'AND(ISNUMBER($F2),$F2>=8,$F2<=30)']
+        assert formulas == ['AND(ISNUMBER($D2),$D2<0)',
+                            'AND(ISNUMBER($D2),$D2=0)',
+                            'AND(ISNUMBER($D2),$D2>=1,$D2<=2)',
+                            'AND(ISNUMBER($D2),$D2>=3,$D2<=7)',
+                            'AND(ISNUMBER($D2),$D2>=8,$D2<=30)']
+        styles_xml = ET.fromstring(book.read('xl/styles.xml'))
+        dxfs = styles_xml.find('m:dxfs', NS)
+        for rule, background, foreground in zip(
+            sheet.findall('.//m:cfRule', NS),
+            ['FF333333', 'FF9C0006', 'FFFFC7CE', 'FFF4B183', 'FFFFEB9C'],
+            ['FFD9D9D9', 'FFFFFFFF', None, None, None],
+        ):
+            style = dxfs[int(rule.attrib['dxfId'])]
+            assert style.find('m:fill/m:patternFill/m:bgColor', NS).attrib['rgb'] == background
+            if foreground:
+                assert style.find('m:font/m:color', NS).attrib['rgb'] == foreground
         cell_formulas = sheet.findall('.//m:c/m:f', NS)
         assert len(cell_formulas) == len(results)
         expected = 'IF([[#This Row],[Fin de disponibilité]]="","",[[#This Row],[Fin de disponibilité]]-TODAY())'
         assert all(formula.text == expected for formula in cell_formulas)
         assert table.find('.//m:calculatedColumnFormula', NS).text == expected
-        assert all(cell.attrib['r'].startswith('F')
+        assert all(cell.attrib['r'].startswith('D')
                    for cell in sheet.findall('.//m:c', NS) if cell.find('m:f', NS) is not None)
         calculation = ET.fromstring(book.read('xl/workbook.xml')).find('m:calcPr', NS)
         assert calculation.attrib['fullCalcOnLoad'] == '1'
         assert len(sheet.findall('m:hyperlinks/m:hyperlink', NS)) == 9
-        assert all(link.attrib['ref'].startswith('H')
+        assert all(link.attrib['ref'].startswith('I')
                    for link in sheet.findall('m:hyperlinks/m:hyperlink', NS))
         hidden = [c for c in sheet.findall('m:cols/m:col', NS) if c.attrib.get('hidden') == '1']
-        assert len(hidden) == 1 and hidden[0].attrib['min'] == '9'
+        assert len(hidden) == 1 and hidden[0].attrib['min'] == '10'
         styles = book.read('xl/styles.xml').decode()
         assert 'dd/mm/yyyy' in styles
         # A known date is an Excel numeric value; an unknown date/day is blank.
-        assert sheet.find('.//m:c[@r="E2"]/m:v', NS) is not None
-        assert sheet.find('.//m:c[@r="E10"]/m:v', NS) is None
-        assert sheet.find('.//m:c[@r="F10"]/m:v', NS).text is None
+        assert sheet.find('.//m:c[@r="K2"]/m:v', NS) is not None
+        assert sheet.find('.//m:c[@r="K10"]/m:v', NS) is None
+        assert sheet.find('.//m:c[@r="D10"]/m:v', NS).text is None
         assert 'HYPERLINK' in book.read('xl/sharedStrings.xml').decode()
 
 
@@ -75,9 +88,9 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
     path = tmp_path / 'subgenre.xlsx'
     frame = write_excel(results, path)
     assert frame.columns.tolist() == [
-        'Titre', 'Catégorie', 'Sous-genre', 'Service', 'Fin de disponibilité',
-        'Jours restants', "Dans l'offre", 'URL myCANAL', 'Content ID', 'Statut',
-        'Durée', 'Disponible jusqu’au',
+        'Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
+        'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
+        'Fin de disponibilité', 'Statut',
     ]
     assert frame['Catégorie'].tolist() == [item.subtitle, item.subtitle]
     assert frame['Sous-genre'].tolist() == [item.subtitle, '']
@@ -87,10 +100,10 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
         assert headers == frame.columns.tolist()
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        for ref in ('B2', 'C2', 'B3'):
+        for ref in ('G2', 'B2', 'G3'):
             index = int(sheet.find(f'.//m:c[@r="{ref}"]/m:v', NS).text)
             assert ''.join(strings[index].itertext()) == item.subtitle
-        assert sheet.find('.//m:c[@r="C3"]/m:v', NS) is None
+        assert sheet.find('.//m:c[@r="B3"]/m:v', NS) is None
 
 
 def test_new_presentation_columns_are_exported_as_text(tmp_path, item):
@@ -99,11 +112,11 @@ def test_new_presentation_columns_are_exported_as_text(tmp_path, item):
     path = tmp_path / 'presentation.xlsx'
     frame = write_excel([result], path)
     assert frame['Durée'].tolist() == ['1 h 47 min']
-    assert frame['Disponible jusqu’au'].tolist() == ['mercredi 30 septembre 23h59']
+    assert frame["Disponible jusqu'au"].tolist() == ['mercredi 30 septembre 23h59']
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        for ref, expected in [('K2', '1 h 47 min'), ('L2', result.availability_text)]:
+        for ref, expected in [('F2', '1 h 47 min'), ('E2', result.availability_text)]:
             cell = sheet.find(f'.//m:c[@r="{ref}"]', NS)
             assert cell.attrib['t'] == 's'
             assert ''.join(strings[int(cell.find('m:v', NS).text)].itertext()) == expected
