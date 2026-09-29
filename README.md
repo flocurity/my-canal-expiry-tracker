@@ -97,10 +97,9 @@ if some rows failed; the final structured log includes status counts.
 
 `cache/details.json` is keyed by playlist `contentID` and keeps raw detail enrichment
 for 24 hours. URL, Hodor-token and feature-toggle changes alone do not invalidate
-fresh entries. A `detailSeason` additionally records `season_content_id`, the stable
-endpoint season ID: real playlists use a brand ID as `contentID` while linking to
-a particular season. Changing the season, or switching between show and season,
-requires a fetch. No other query parameters participate in cache identity.
+fresh entries. Series subgenre is cached by brand identity; episode catalogs are cached separately
+per stable brand/season identity in the same file. Moving the resume point or
+changing a detail URL does not invalidate fresh catalogs.
 
 Entries contain `retrieved_at`, the canonical `availability_end_date` Unix timestamp
 in milliseconds (or null), and `subgenre`. Optional `availability_label` retains only
@@ -143,7 +142,7 @@ The regenerated file is `output/ma-liste-canal.xlsx`, with one `Ma liste` sheet:
   values retain normal Table formatting.
 
 Column order: `Titre`, `Sous-genre`, `Service`, `Jours restants`,
-`Disponible jusqu'au`, `Durée`, `Catégorie`, `Dans l'offre`, `URL myCANAL`,
+`Disponible jusqu'au`, `Épisode à reprendre`, `Épisodes restants`, `Durée`, `Catégorie`, `Dans l'offre`, `URL myCANAL`,
 `Content ID` (hidden), `Fin de disponibilité`, `Statut`.
 `Catégorie` still comes from playlist metadata. `Sous-genre` uses `detail.subgenre`
 first, falling back to `tracking.dataLayer.subgenre` when the first value is missing,
@@ -164,8 +163,22 @@ above. Excel's `TODAY()` uses the date of the Excel environment. Python supplies
 only an initial cached preview. `lastDays`
 is never used. Text from the source is written as text, not Excel formulas.
 
-A show/season may lack its own availability date: it is then `Date inconnue`.
-V1 does not crawl episodes or infer a series expiration from episode dates.
+For series, `Épisode à reprendre` shows the matched resume episode (for example
+`S3E3`), and `Épisodes restants` counts that episode and every later episode/season.
+Fresh playlist resume metadata wins over conflicting detail actions. The current
+episode counts in full, even when partially watched. `Durée` sums remaining episode
+durations; one missing duration leaves the total blank. Expiration is the earliest
+valid timestamp among remaining episodes, or unknown if none is available.
+
+Catalogs use public `/episodes` URLs and the existing paced HTTP client, with about
+one request per missing/stale required season and no per-episode requests. Fresh
+catalogs are reusable after token or resume changes. One detail request may be needed
+for navigation or fallback resume state; no authenticated progression endpoint is
+used. URLs, progress and derived backlog values are never cached. Incomplete paging,
+missing navigation or an unmatched resume point produces blank uncertain values and
+`Série incomplète`; HTTP errors retain their existing status. A safely matched resume
+label is retained if a later-season fetch fails. See SPEC.md for exact cache and
+completeness semantics.
 An empty playlist generates a Table with one blank data row (required by Excel).
 Close the workbook in Excel before regenerating it if your platform locks open files.
 
@@ -184,8 +197,8 @@ When playlist movie duration is missing/unusable, the verified detailV5 fallback
 may be cached as `duration_minutes`; it also identifies a movie when playlist category
 metadata is missing. A usable current playlist duration takes priority over this
 fallback. For example, 107 minutes becomes `1 h 47 min`, 60 becomes `1 h 00 min`,
-and 47 becomes `0 h 47 min`. Folder/series durations remain blank. No extra request is
-made for duration, and no episode aggregation is performed. Missing, non-integer,
+and 47 becomes `0 h 47 min`. Series use total remaining episode duration as described
+above. No per-episode detail requests are made for duration. Missing, non-integer,
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.
 

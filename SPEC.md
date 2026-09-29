@@ -96,6 +96,8 @@ Keep at least the following fields for each item:
 - `altLogoChannel`
 - `isInOffer`
 - raw `duration` in milliseconds when present and usable
+- `seasonID`, `episodeID`, numeric `seasonNumber`/`episodeNumber` when present,
+  and `userProgress` (never used to prorate backlog duration)
 - `onClick.path`
 - `onClick.URLPage`
 - whether `onClick.parameters` declares `detailV5` in a string-array `enum` for
@@ -234,6 +236,8 @@ Build a pandas DataFrame ideally containing the following columns:
 - `Service`
 - `Jours restants`
 - `Disponible jusqu'au`
+- `Épisode à reprendre`
+- `Épisodes restants`
 - `Durée`
 - `Catégorie`
 - `Dans l'offre`
@@ -277,8 +281,8 @@ When playlist movie duration is missing/unusable, the verified detailV5 fallback
 may be cached as `duration_minutes`; it also identifies a movie when playlist category
 metadata is missing. A usable current playlist duration takes priority over this
 fallback. For example, 107 minutes becomes `1 h 47 min`, 60 becomes `1 h 00 min`,
-and 47 becomes `0 h 47 min`. Folder/series durations remain blank. No extra request is
-made for duration, and no episode aggregation is performed. Missing, non-integer,
+and 47 becomes `0 h 47 min`. Series use the remaining-episode duration described
+below. No per-episode detail request is made for duration. Missing, non-integer,
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.
 
@@ -295,6 +299,108 @@ The Excel date, absolute availability text and status are derived at runtime fro
 raw enrichment on both fresh fetches and cache hits. The playlist supplies current
 titles, categories, service, offer membership, paths, URLs and duration. None of
 that playlist metadata is duplicated into the detail cache.
+
+## V1.2 series backlog
+
+Folder entries use the fresh playlist `seasonID` and `episodeID` as the authoritative
+resume point. Trustworthy episode numbers are a fallback for matching within the
+identified season; array position and `isCompleted` are not progression sources.
+A matching stable episode ID takes precedence over an episode number. A complete
+but unmatchable playlist point is not replaced by conflicting detail metadata.
+When playlist resume information is incomplete, use detailV5 primary-action
+`onClick.contentID`, the `seasonID` query parameter in `URLEpisodesList`, and
+structured `seasonNumber`/`episodeNumber` in action tracking (including nested
+tracking). Conflicting partial playlist/detail coordinates are left unresolved.
+No `/me`, `URLPerso`, tokenPass or authenticated progression endpoint is used.
+
+`Épisode à reprendre` is `S{seasonNumber}E{episodeNumber}` for the safely matched
+catalog episode. It is immediately followed by numeric `Épisodes restants`, then
+`Durée`. Both new columns are blank for movies. Existing movie sourcing, numeric
+durations, expiration handling, Excel formulas and formatting are unchanged.
+
+Include the resume episode in full regardless of `userProgress`, all numerically
+later episodes in that season, and every episode in every later season. Ignore
+earlier seasons and episodes without fetching earlier catalogs to verify viewing
+history. Season and episode ordering uses structured numbers, not contiguous IDs,
+array order or descriptions. Duplicate/contradictory identities are rejected.
+
+The public `/episodes` endpoint returns `episodes.contents`, `episodes.paging`
+and a top-level `selector`. Selector entries expose `contentID`, `seasonNumber`
+and `onClick.URLPage`; use those URLs for later seasons. Structured
+`detail.seasons` or `parentShow.seasons` can supply a selector fallback when absent.
+They do not themselves supply a resume episode. Detail tabs can supply an episodes
+URL when a playlist resume point is already known. A legacy response without any
+usable episodes URL remains unsupported rather than triggering speculative requests.
+
+Use the existing client, Firefox-like User-Agent, compression, timeout, pacing,
+jitter and retries for all requests. Never append detailV5 to an episodes URL.
+If the playlist season differs from the action's season, replace only the existing
+`seasonID` query parameter on the API-provided episodes endpoint. The same limited
+substitution can recover a missing/stale season's URL after URLs were deliberately
+excluded from the cache. Other selector URLs are used as supplied. No endpoints are
+constructed from tokens, no per-episode requests are made, and traversal stops with
+an explicit incomplete result if it would exceed 100 seasons.
+
+Parse duration labels such as `57 min`, `1h02`, `1h31` (also accepting spaces around
+units) into canonical whole minutes. One missing/unparseable remaining duration
+makes the total duration blank; the known episode count and expiration can still be
+reported. Earlier episodes with missing durations do not affect the remaining total.
+Excel stores the sum as minutes / 1440 with `[h]" h "mm" min"` formatting.
+
+Use the earliest valid raw `availabilityEndDate` among remaining episodes only.
+Missing/invalid timestamps are ignored; if none is valid, use `Date inconnue` and
+blank expiration fields. This is the earliest **known** expiration, not a guarantee
+that episodes with missing timestamps have no earlier expiry. Reuse the existing
+Europe/Paris conversion and dynamic `Jours restants` formula without another date
+formatter. Do not use relative labels or series-level dates to replace missing
+episode expiration data.
+
+### Catalog completeness and cache
+
+Inspected paging contains `hasNextPage`, `hasPreviousPage`, `idStart`, `idEnd` and
+`nbContents`. Both page flags must be false, and a supplied numeric `nbContents`
+must match the returned count. No continuation URL was observed. Cursor semantics
+have not been verified, so a paginated/partial response produces `Série incomplète`
+with blank totals rather than speculative paging or a misleading partial backlog.
+The same applies to unknown resume coordinates, missing selectors, malformed
+coordinates or conflicting catalogs. HTTP failures retain their existing error
+status. If the resume episode was safely matched before a later catalog failed,
+keep that label, but leave remaining count, duration and expiration blank. Preserve
+trustworthy playlist metadata and subgenre and log structured, URL-free reasons.
+
+Extend the existing `cache/details.json` and its atomic writes/24-hour TTL with
+entries keyed `season:{playlist_content_id}:{season_id}`. Each entry contains:
+
+- `kind: "season"`, `brand_id`, `retrieved_at`;
+- `catalog.season`: stable `content_id` and `number`;
+- `catalog.seasons`: the selector's stable season IDs/numbers, without URLs;
+- `catalog.episodes`: `content_id`, `number`, nullable canonical `duration_minutes`
+  and nullable raw `availability_end_date` milliseconds.
+
+Store only validated complete catalogs, independently per season. Never persist
+resume position, progress, completion flags, action metadata, Hodor URLs/tokens,
+credentials or derived totals/display strings. Cache loading validates and
+whitelists catalog fields; invalid catalogs are misses. Existing movie entries
+remain compatible. Scalar series subgenre entries no longer need a season-bound
+resource discriminator; older resource-bound entries can be refreshed when needed.
+Failed refreshes preserve prior raw entries without presenting stale data as a
+successful fresh result. Complete seasons fetched before another season fails
+remain reusable.
+
+A fresh playlist resume change immediately recalculates the backlog against cached
+catalogs, including when the resume moves into a cached later season. With usable
+playlist resume state and all needed catalogs fresh, no network request is required.
+Otherwise fetch approximately one catalog per missing/expired required season, plus
+at most one detail request to obtain current navigation. Without usable playlist
+resume state, fresh detail/action metadata is required for fallback on each run;
+that potentially user-specific state is not cached. `--refresh` bypasses catalog
+and scalar caches. Selectors refresh with their catalog TTL, so newly published
+seasons may require expiry or `--refresh` to become visible.
+
+Schema observations were verified with a small number of public detail/episodes
+requests. Default tests remain fully mocked. Fixtures preserve observed nesting
+but use synthetic titles, IDs, tokens and progression. Provider-wide coverage and
+multi-page navigation remain based on limited observations, not a public API contract.
 
 ## Sorting
 
@@ -403,10 +509,10 @@ For example:
 
 `cache/details.json` is keyed by playlist `contentID` and keeps raw detail enrichment
 for 24 hours. URL, Hodor-token and feature-toggle changes alone do not invalidate
-fresh entries. A `detailSeason` additionally records `season_content_id`, the stable
-endpoint season ID: real playlists use a brand ID as `contentID` while linking to
-a particular season. Changing the season, or switching between show and season,
-requires a fetch. No other query parameters participate in cache identity.
+fresh entries. Scalar detail entries can retain `season_content_id` for resource-bound data.
+For V1.2 series, scalar subgenre enrichment is brand-level; season-specific data
+lives in independently cached season catalogs. Moving the resume point, changing
+a token or changing a detail URL does not invalidate those catalogs.
 
 Entries contain `retrieved_at`, the canonical `availability_end_date` Unix timestamp
 in milliseconds (or null), and `subgenre`. Optional `availability_label` retains only

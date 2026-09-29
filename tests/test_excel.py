@@ -32,10 +32,10 @@ def test_excel_native_features_and_untrusted_text(tmp_path, item):
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         table = ET.fromstring(book.read('xl/tables/table1.xml'))
-        assert table.attrib['ref'] == 'A1:L10'
-        assert table.find('m:autoFilter', NS).attrib['ref'] == 'A1:L10'
+        assert table.attrib['ref'] == 'A1:N10'
+        assert table.find('m:autoFilter', NS).attrib['ref'] == 'A1:N10'
         assert sheet.find('m:sheetViews/m:sheetView/m:pane', NS).attrib['ySplit'] == '1'
-        assert sheet.find('m:conditionalFormatting', NS).attrib['sqref'] == 'A2:L10'
+        assert sheet.find('m:conditionalFormatting', NS).attrib['sqref'] == 'A2:N10'
         formulas = [e.text for e in sheet.findall('.//m:cfRule/m:formula', NS)]
         assert formulas == ['AND(ISNUMBER($D2),$D2<0)',
                             'AND(ISNUMBER($D2),$D2=0)',
@@ -63,15 +63,15 @@ def test_excel_native_features_and_untrusted_text(tmp_path, item):
         calculation = ET.fromstring(book.read('xl/workbook.xml')).find('m:calcPr', NS)
         assert calculation.attrib['fullCalcOnLoad'] == '1'
         assert len(sheet.findall('m:hyperlinks/m:hyperlink', NS)) == 9
-        assert all(link.attrib['ref'].startswith('I')
+        assert all(link.attrib['ref'].startswith('K')
                    for link in sheet.findall('m:hyperlinks/m:hyperlink', NS))
         hidden = [c for c in sheet.findall('m:cols/m:col', NS) if c.attrib.get('hidden') == '1']
-        assert len(hidden) == 1 and hidden[0].attrib['min'] == '10'
+        assert len(hidden) == 1 and hidden[0].attrib['min'] == '12'
         styles = book.read('xl/styles.xml').decode()
         assert 'dd/mm/yyyy' in styles
         # A known date is an Excel numeric value; an unknown date/day is blank.
-        assert sheet.find('.//m:c[@r="K2"]/m:v', NS) is not None
-        assert sheet.find('.//m:c[@r="K10"]/m:v', NS) is None
+        assert sheet.find('.//m:c[@r="M2"]/m:v', NS) is not None
+        assert sheet.find('.//m:c[@r="M10"]/m:v', NS) is None
         assert sheet.find('.//m:c[@r="D10"]/m:v', NS).text is None
         assert 'HYPERLINK' in book.read('xl/sharedStrings.xml').decode()
 
@@ -81,7 +81,7 @@ def test_empty_export_has_table(tmp_path):
     write_excel([], path)
     with ZipFile(path) as book:
         table = ET.fromstring(book.read('xl/tables/table1.xml'))
-        assert table.attrib['ref'] == 'A1:L2'
+        assert table.attrib['ref'] == 'A1:N2'
 
 
 def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
@@ -91,7 +91,7 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
     frame = write_excel(results, path)
     assert frame.columns.tolist() == [
         'Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
-        'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
+        'Épisode à reprendre', 'Épisodes restants', 'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
         'Fin de disponibilité', 'Statut',
     ]
     assert frame['Catégorie'].tolist() == [item.subtitle, item.subtitle]
@@ -102,7 +102,7 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
         assert headers == frame.columns.tolist()
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        for ref in ('G2', 'B2', 'G3'):
+        for ref in ('I2', 'B2', 'I3'):
             index = int(sheet.find(f'.//m:c[@r="{ref}"]/m:v', NS).text)
             assert ''.join(strings[index].itertext()) == item.subtitle
         assert sheet.find('.//m:c[@r="B3"]/m:v', NS) is None
@@ -118,7 +118,7 @@ def test_duration_is_numeric_and_availability_is_text(tmp_path, item):
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         strings = ET.fromstring(book.read('xl/sharedStrings.xml'))
-        duration = sheet.find('.//m:c[@r="F2"]', NS)
+        duration = sheet.find('.//m:c[@r="H2"]', NS)
         assert duration.attrib.get('t', 'n') == 'n'
         assert float(duration.find('m:v', NS).text) == pytest.approx(107 / 1440)
         styles = ET.fromstring(book.read('xl/styles.xml'))
@@ -144,3 +144,23 @@ def test_playlist_duration_has_priority_and_folders_stay_empty(item):
 def test_non_movie_playlist_duration_is_not_used(item):
     documentary = replace(item, subtitle='Doc. Nature', duration_ms=5880000)
     assert build_dataframe([ContentResult(documentary, None, 'Date inconnue')])['Durée'].iloc[0] == ''
+
+
+def test_series_backlog_columns_and_numeric_duration(tmp_path, item):
+    series = replace(item, content_type='folder', title='Pikachu')
+    results = [ContentResult(series, date(2026, 9, 30), 'OK', duration_minutes=1697,
+                             resume_episode='S3E3', episodes_remaining=27),
+               ContentResult(item, None, 'Date inconnue')]
+    path = tmp_path / 'series.xlsx'
+    frame = write_excel(results, path)
+    assert frame['Épisode à reprendre'].tolist() == ['S3E3', '']
+    assert frame['Épisodes restants'].iloc[0] == 27
+    with ZipFile(path) as book:
+        sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
+        count = sheet.find('.//m:c[@r="G2"]', NS)
+        duration = sheet.find('.//m:c[@r="H2"]', NS)
+        assert count.attrib.get('t', 'n') == duration.attrib.get('t', 'n') == 'n'
+        assert int(count.find('m:v', NS).text) == 27
+        assert float(duration.find('m:v', NS).text) == pytest.approx(1697 / 1440)
+        for ref in ('F3', 'G3', 'H3'):
+            assert sheet.find(f'.//m:c[@r="{ref}"]/m:v', NS) is None

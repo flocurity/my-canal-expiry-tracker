@@ -220,3 +220,28 @@ def test_detail_v5_builder_rejects_invalid_source_before_rebuilding():
     from src.canal_api import build_detail_url
     with pytest.raises(DetailError):
         build_detail_url('https://hodor.canalplus.pro/api/v2/mycanal/detail/a\n.json', True)
+
+
+def test_episodes_reuses_http_retry_and_does_not_add_detail_toggle(client, fixture_data):
+    api, session, sleep = client
+    url = ('https://hodor.canalplus.pro/api/v2/mycanal/episodes/' + 'a' * 32
+           + '/squirtle_brand?seasonID=squirtle_s3')
+    payload = fixture_data('episodes_series.json')
+    session.get.side_effect = [http_response(503), http_response(payload=payload)]
+    assert api.fetch_episodes(url) == payload
+    assert all(call.args[0] == url for call in session.get.call_args_list)
+    sleep.assert_called_once_with(1.1)
+
+
+@pytest.mark.parametrize('url', [
+    'https://hodor.canalplus.pro/api/v2/mycanal/me/context',
+    'https://evil.test/api/v2/mycanal/episodes/context',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/../me/context',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/%2e%2e/me/context',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/context?tokenPass=fake',
+])
+def test_episodes_rejects_private_or_unsafe_endpoints(client, url):
+    api, session, sleep = client
+    with pytest.raises(DetailError):
+        api.fetch_episodes(url)
+    session.get.assert_not_called()

@@ -10,8 +10,8 @@ from src.expiration import days_remaining, paris_today
 from src.tracker import ContentResult
 
 COLUMNS = ['Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
-           'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
-           'Fin de disponibilité', 'Statut']
+           'Épisode à reprendre', 'Épisodes restants', 'Durée', 'Catégorie',
+           "Dans l'offre", 'URL myCANAL', 'Content ID', 'Fin de disponibilité', 'Statut']
 
 
 DAYS_FORMULA = (
@@ -23,7 +23,9 @@ DAYS_FORMULA = (
 def excel_duration(result: ContentResult) -> float | str:
     item = result.item
     if item.content_type == 'folder':
-        return ''
+        return (result.duration_minutes / 1440
+                if result.episodes_remaining is not None
+                and result.duration_minutes is not None else '')
     # Playlist duration is current; the verified detail movie duration is a fallback.
     minutes = item.movie_duration_minutes
     if minutes is None:
@@ -47,6 +49,8 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
             'Service': item.service,
             'Jours restants': days_remaining(result.expiration, today),
             "Disponible jusqu'au": result.availability_text,
+            'Épisode à reprendre': result.resume_episode,
+            'Épisodes restants': result.episodes_remaining,
             'Durée': excel_duration(result),
             'Catégorie': item.subtitle,
             "Dans l'offre": None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
@@ -57,6 +61,7 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
         })
     frame = pd.DataFrame(records, columns=COLUMNS)
     frame['Jours restants'] = pd.array(frame['Jours restants'], dtype='Int64')
+    frame['Épisodes restants'] = pd.array(frame['Épisodes restants'], dtype='Int64')
     return frame.sort_values(['Fin de disponibilité', 'Jours restants'], na_position='last',
                              kind='stable').reset_index(drop=True)
 
@@ -79,7 +84,7 @@ def write_excel(
         days_column = COLUMNS.index('Jours restants')
         duration_format = workbook.add_format({'num_format': '[h]" h "mm" min"'})
         formats = {'Fin de disponibilité': date_format, 'Jours restants': integer_format,
-                   'Durée': duration_format}
+                   'Durée': duration_format, 'Épisodes restants': integer_format}
         for name, fmt in formats.items():
             columns[COLUMNS.index(name)]['format'] = fmt
         columns[days_column]['formula'] = DAYS_FORMULA

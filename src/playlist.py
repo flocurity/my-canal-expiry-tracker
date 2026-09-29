@@ -26,6 +26,11 @@ class PlaylistItem:
     detail_url: str
     supports_detail_v5: bool = False
     duration_ms: int | None = None
+    season_id: str = ''
+    episode_id: str = ''
+    season_number: int | None = None
+    episode_number: int | None = None
+    user_progress: int | None = None
 
     @property
     def movie_duration_minutes(self) -> int | None:
@@ -62,6 +67,10 @@ class PlaylistItem:
 
 def _text(value: object) -> str:
     return value if isinstance(value, str) else ''
+
+
+def _positive_number(value: object) -> int | None:
+    return value if type(value) is int and value > 0 else None
 
 
 def _declares_detail_v5(parameters: object) -> bool:
@@ -127,6 +136,12 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
                 path=_text(click.get('path')),
                 detail_url=click['URLPage'],
                 supports_detail_v5=_declares_detail_v5(click.get('parameters')),
+                season_id=_text(raw.get('seasonID')),
+                episode_id=_text(raw.get('episodeID')),
+                season_number=_positive_number(raw.get('seasonNumber')),
+                episode_number=_positive_number(raw.get('episodeNumber')),
+                user_progress=(raw.get('userProgress')
+                               if type(raw.get('userProgress')) is int else None),
                 duration_ms=(duration if isinstance(duration, int)
                              and not isinstance(duration, bool) and duration > 0 else None),
             ))

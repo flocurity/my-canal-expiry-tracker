@@ -5,7 +5,7 @@ import random
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -25,7 +25,7 @@ class DetailError(Exception):
         self.status = status
 
 
-def validate_detail_url(url: str) -> None:
+def validate_api_url(url: str, resource: str) -> None:
     try:
         parsed = urlsplit(url)
         valid = (
@@ -33,14 +33,20 @@ def validate_detail_url(url: str) -> None:
             and parsed.hostname == 'hodor.canalplus.pro'
             and parsed.port in (None, 443)
             and not parsed.username and not parsed.password
-            and parsed.path.startswith('/api/v2/mycanal/detail/')
+            and parsed.path.startswith(f'/api/v2/mycanal/{resource}/')
+            and not any(part in ('.', '..') for part in unquote(parsed.path).split('/'))
+            and not any(key.casefold() == 'tokenpass' for key, _ in parse_qsl(parsed.query))
             and not parsed.fragment
             and not any(char.isspace() or char == '\\' for char in url)
         )
     except ValueError:
         valid = False
     if not valid:
-        raise DetailError('Expected a public HTTPS hodor.canalplus.pro /detail/ URL')
+        raise DetailError(f'Expected a public HTTPS hodor.canalplus.pro /{resource}/ URL')
+
+
+def validate_detail_url(url: str) -> None:
+    validate_api_url(url, 'detail')
 
 
 def build_detail_url(source_url: str, supports_detail_v5: bool = False) -> str:
@@ -98,7 +104,13 @@ class CanalClient:
         self.session.close()
 
     def fetch(self, url: str, content_id: str = '') -> dict:
-        validate_detail_url(url)
+        return self._fetch(url, content_id, 'detail')
+
+    def fetch_episodes(self, url: str, content_id: str = '') -> dict:
+        return self._fetch(url, content_id, 'episodes')
+
+    def _fetch(self, url: str, content_id: str, resource: str) -> dict:
+        validate_api_url(url, resource)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if self._has_requested:
                 time.sleep(max(random.uniform(self.delay, self.delay + 0.15), self._cooldown))
@@ -124,9 +136,9 @@ class CanalClient:
                                 'Response is not valid JSON', 'Erreur parsing'
                             ) from exc
                         if not isinstance(payload, dict) or not isinstance(
-                            payload.get('detail'), dict
+                            payload.get(resource), dict
                         ):
-                            raise DetailError('Missing or invalid detail object', 'Erreur parsing')
+                            raise DetailError(f'Missing or invalid {resource} object', 'Erreur parsing')
                         return payload
                     if status_code not in RETRY_STATUSES:
                         raise DetailError(f'HTTP {status_code}')

@@ -20,10 +20,15 @@ def test_invalid_input_prevents_api_and_output(tmp_path, monkeypatch):
 
 def test_end_to_end_mocked(tmp_path, monkeypatch, fixture_data):
     (tmp_path / 'input').mkdir()
-    (tmp_path / 'input' / 'page.json').write_text(json.dumps(fixture_data('playlist.json')))
+    playlist = fixture_data('playlist.json')
+    playlist['contents'][1].update(seasonID='squirtle_s3', episodeID='squirtle_s3e3')
+    (tmp_path / 'input' / 'page.json').write_text(json.dumps(playlist))
     monkeypatch.setattr(main, 'ROOT', tmp_path)
     client = Mock()
-    client.fetch.return_value = fixture_data('detail_movie.json')
+    client.fetch.side_effect = lambda url, content_id: fixture_data(
+        'detail_movie.json' if content_id == 'fiction_50001' else 'detail_series_v5.json'
+    )
+    client.fetch_episodes.return_value = fixture_data('episodes_series.json')
     context = Mock()
     context.__enter__ = Mock(return_value=client)
     context.__exit__ = Mock(return_value=None)
@@ -32,10 +37,13 @@ def test_end_to_end_mocked(tmp_path, monkeypatch, fixture_data):
     assert (tmp_path / 'output' / 'ma-liste-canal.xlsx').exists()
     assert (tmp_path / 'cache' / 'details.json').exists()
     assert client.fetch.call_count == 2
+    assert client.fetch_episodes.call_count == 1
     assert main.main([]) == 0
     assert client.fetch.call_count == 2
+    assert client.fetch_episodes.call_count == 1
     assert main.main(['--refresh', '--delay', '0.5']) == 0
     assert client.fetch.call_count == 4
+    assert client.fetch_episodes.call_count == 2
 
 
 @pytest.mark.parametrize('value', ['-1', 'nan', 'inf', 'bad'])

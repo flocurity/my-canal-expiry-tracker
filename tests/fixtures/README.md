@@ -41,3 +41,15 @@ folders. The field also occurs on some non-movie VoD items, so duration alone do
 not classify a movie. The detailV5 fixture remains the verified fallback when
 playlist movie duration is absent. Cache token regression tests use fictional
 same-shape tokens; they never call the network or persist request URLs in cache.
+
+
+`detail_series_v5.json` and `episodes_series.json` retain the series structures
+inspected on 2026-09-29: primary-action `onClick.URLEpisodesList`, action
+`tracking.dataLayer` coordinates, `episodes.contents`, `episodes.paging`, and a
+top-level selector with structured season numbers and `onClick.URLPage`. Every
+title, identity, token and resume scenario is synthetic. Episode counts, durations
+and dates form deliberately constructed regressions, not personal viewing exports.
+The inspected paging flags were both false and `nbContents` matched the returned
+array length; no safe continuation URL was observed. Multi-page/corrupt variants
+are synthetic failure cases. Legacy `detail.seasons` was also observed with
+structured numbers and IDs; legacy detail URLs are not mistaken for episodes URLs.

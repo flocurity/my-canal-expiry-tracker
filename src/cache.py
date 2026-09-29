@@ -9,6 +9,7 @@ from pathlib import Path
 from log import get_logger
 from src.detail import DetailData
 from src.expiration import availability_from_raw
+from src.series import SeasonCatalog, identifier
 
 log = get_logger(__name__)
 CACHE_LIFETIME = timedelta(hours=24)
@@ -38,6 +39,17 @@ class DetailCache:
 
     @staticmethod
     def _normalize_entry(entry: object) -> dict | None:
+        if isinstance(entry, dict) and entry.get('kind') == 'season':
+            try:
+                catalog = SeasonCatalog.from_cache(entry.get('catalog'))
+                brand_id = identifier(entry.get('brand_id'))
+                if not brand_id:
+                    return None
+                return {'kind': 'season', 'brand_id': brand_id,
+                        'retrieved_at': entry.get('retrieved_at'),
+                        'catalog': catalog.to_cache()}
+            except (ValueError, TypeError):
+                return None
         if not isinstance(entry, dict) or 'availability_end_date' not in entry:
             return None
         timestamp = entry['availability_end_date']
@@ -102,6 +114,29 @@ class DetailCache:
             'duration_minutes': detail.duration_minutes,
             'season_content_id': season_content_id,
         })
+        self.dirty = True
+
+    def get_season(self, brand_id: str, season_id: str) -> SeasonCatalog | None:
+        entry = self._normalize_entry(self.entries.get(f'season:{brand_id}:{season_id}'))
+        if entry is None or entry.get('kind') != 'season' or entry['brand_id'] != brand_id:
+            return None
+        try:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(entry['retrieved_at'])
+            if not timedelta(0) <= age < self.lifetime:
+                return None
+            catalog = SeasonCatalog.from_cache(entry['catalog'])
+            return catalog if catalog.season.content_id == season_id else None
+        except (ValueError, TypeError):
+            return None
+
+    def put_season(self, brand_id: str, catalog: SeasonCatalog) -> None:
+        if not identifier(brand_id):
+            return
+        self.entries[f'season:{brand_id}:{catalog.season.content_id}'] = {
+            'kind': 'season', 'brand_id': brand_id,
+            'retrieved_at': datetime.now(timezone.utc).isoformat(),
+            'catalog': catalog.to_cache(),
+        }
         self.dirty = True
 
     def save(self) -> None:

@@ -265,27 +265,13 @@ def test_export_with_97_cached_and_three_new_items(tmp_path, item, fixture_data)
                for result in results[:97])
 
 
-def test_season_resource_changes_invalidate_brand_cache(tmp_path, fixture_data):
-    import json
-    from src.playlist import load_playlist
-    from src.canal_api import build_detail_url
-    (tmp_path / 'playlist.json').write_text(json.dumps(fixture_data('playlist.json')))
-    season = load_playlist(tmp_path)[1]
-    path = tmp_path / 'details.json'
-    client = Mock()
-    client.fetch.return_value = fixture_data('detail_season.json')
-    process_items([season], client, DetailCache(path))
-    changed_query = replace(season, detail_url=season.detail_url + '&displayLogo=false')
-    process_items([changed_query], client, DetailCache(path))
-    assert client.fetch.call_count == 1
-    next_season = replace(season, detail_url=season.detail_url.replace(
-        'fiction_season_50002.json', 'fiction_season2_50002.json'))
-    process_items([next_season], client, DetailCache(path))
-    assert client.fetch.call_count == 2
-    client.fetch.assert_called_with(build_detail_url(next_season.detail_url, True), season.content_id)
-    show = replace(season, detail_url=season.detail_url.replace('detailSeason', 'detailShow'))
-    process_items([show], client, DetailCache(path))
-    assert client.fetch.call_count == 3
+def test_season_resource_changes_invalidate_scalar_detail_cache(tmp_path, item):
+    cache = DetailCache(tmp_path / 'details.json')
+    detail = DetailData(1790805540000)
+    cache.put(item.content_id, detail, 'fiction_season1')
+    assert cache.get(item.content_id, 'fiction_season1') == detail
+    assert cache.get(item.content_id, 'fiction_season2') is None
+    assert cache.get(item.content_id) is None
 
 
 @pytest.mark.parametrize('failure', [DetailError('HTTP 403'), ValueError('invalid detail')])

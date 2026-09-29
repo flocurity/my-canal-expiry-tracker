@@ -1,0 +1,24 @@
+{
+  "detail": {
+    "contentID": "squirtle_brand",
+    "title": "Squirtle",
+    "subgenre": "Série Animation"
+  },
+  "actionLayout": {
+    "primaryActions": [
+      {
+        "type": "play",
+        "onClick": {
+          "contentID": "squirtle_s3e1",
+          "URLEpisodesList": "https://hodor.canalplus.pro/api/v2/mycanal/episodes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/squirtle_brand?seasonID=squirtle_s3"
+        },
+        "tracking": {
+          "dataLayer": {
+            "seasonNumber": 3,
+            "episodeNumber": 1
+          }
+        }
+      }
+    ]
+  }
+}
