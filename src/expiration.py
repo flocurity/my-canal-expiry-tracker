@@ -17,40 +17,53 @@ def days_remaining(end_date: date | None, today: date | None = None) -> int | No
     return (end_date - (today or paris_today())).days if end_date else None
 
 
-def _timestamp_date(value: object) -> date | None:
+def _timestamp_datetime(value: object) -> datetime | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
         if math.isfinite(value):
-            return datetime.fromtimestamp(value / 1000, PARIS).date()
+            return datetime.fromtimestamp(value / 1000, PARIS)
     except (ValueError, OverflowError, OSError):
         pass
     return None
 
 
+def _availability_text(value: datetime) -> str:
+    weekdays = ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')
+    months = ('janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+              'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre')
+    return (f'{weekdays[value.weekday()]} {value.day} {months[value.month - 1]} '
+            f'{value:%Hh%M}')
+
+
 def extract_expiration(payload: object) -> date | None:
+    return extract_availability(payload)[0]
+
+
+def extract_availability(payload: object) -> tuple[date | None, str]:
+    """Select one canonical expiration, retaining its absolute Paris time label."""
     if not isinstance(payload, dict) or not isinstance(payload.get('detail'), dict):
         raise ValueError('Missing or invalid detail object')
-    result = _timestamp_date(payload['detail'].get('availabilityEndDate'))
+    result = _timestamp_datetime(payload['detail'].get('availabilityEndDate'))
     if result is not None:
-        return result
+        return result.date(), _availability_text(result)
     info = payload['detail'].get('informations')
     if not isinstance(info, dict):
-        return None
+        return None, ''
     availability = info.get('contentAvailability')
     if not isinstance(availability, dict):
-        return None
+        return None, ''
     options = availability.get('availabilities')
     if not isinstance(options, dict):
-        return None
+        return None, ''
 
     ordered = [options.get('download'), options.get('stream')]
     ordered.extend(value for key, value in options.items() if key not in ('download', 'stream'))
     for option in ordered:
         if isinstance(option, dict):
-            result = _timestamp_date(option.get('availabilityEndDate'))
+            result = _timestamp_datetime(option.get('availabilityEndDate'))
             if result is not None:
-                return result
+                return result.date(), _availability_text(result)
 
     # Exact timestamps take precedence over the less precise display labels.
     for option in [options.get('stream'), *ordered]:
@@ -59,7 +72,7 @@ def extract_expiration(payload: object) -> date | None:
         match = _LABEL_DATE.search(option['label'])
         if match:
             try:
-                return datetime.strptime(match.group(1), '%d/%m/%Y').date()
+                return datetime.strptime(match.group(1), '%d/%m/%Y').date(), ''
             except ValueError:
                 continue
-    return None
+    return None, ''

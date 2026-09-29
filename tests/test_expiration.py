@@ -108,3 +108,42 @@ def test_documentary_timestamp_with_nondated_label(fixture_data):
         ZoneInfo('Europe/Paris')
     ).date()
     assert extract_expiration(payload) == expected
+
+
+@pytest.mark.parametrize('machine_timezone', ['UTC', 'America/Los_Angeles', 'Asia/Tokyo'])
+def test_absolute_availability_paris_regression(monkeypatch, machine_timezone):
+    import time
+    from src.expiration import extract_availability
+    if not hasattr(time, 'tzset'):
+        pytest.skip('tzset unavailable')
+    with monkeypatch.context() as context:
+        context.setenv('TZ', machine_timezone)
+        time.tzset()
+        try:
+            assert extract_availability({'detail': {'availabilityEndDate': 1790805540000}}) == (
+                date(2026, 9, 30), 'mercredi 30 septembre 23h59',
+            )
+        finally:
+            context.undo()
+            time.tzset()
+
+
+def test_absolute_label_uses_same_timestamp_priority():
+    from src.expiration import extract_availability
+    payload = response({'download': {'availabilityEndDate': 1790805540000},
+                        'stream': {'availabilityEndDate': 1793660340000, 'label': 'demain 23h59'}})
+    assert extract_availability(payload)[1] == 'mercredi 30 septembre 23h59'
+    payload['detail']['availabilityEndDate'] = 1793660340000
+    assert extract_availability(payload)[1] == 'lundi 2 novembre 23h59'
+
+
+@pytest.mark.parametrize('name', ['detail_show.json', 'detail_stream_label.json'])
+def test_no_timestamp_means_no_absolute_label(name, fixture_data):
+    from src.expiration import extract_availability
+    assert extract_availability(fixture_data(name))[1] == ''
+
+
+@pytest.mark.parametrize('value', [None, True, '1790805540000', float('nan'), 10 ** 1000])
+def test_invalid_timestamp_has_no_absolute_label(value):
+    from src.expiration import extract_availability
+    assert extract_availability({'detail': {'availabilityEndDate': value}}) == (None, '')

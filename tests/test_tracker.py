@@ -136,3 +136,53 @@ def test_cache_uses_requested_representation(tmp_path, item, fixture_data, suppo
     assert client.fetch.call_count == int(supports_v5)
     process_items([item], client, cached, refresh=True)
     assert client.fetch.call_count == int(supports_v5) + 1
+
+
+def test_v5_duration_and_availability_survive_cache(tmp_path, item, fixture_data):
+    client = Mock()
+    client.fetch.return_value = fixture_data('detail_movie_v5.json')
+    path = tmp_path / 'details.json'
+    first = process_items([item], client, DetailCache(path))
+    assert first[0].duration == '1 h 38 min'
+    assert first[0].availability_text == 'samedi 9 octobre 23h59'
+    assert process_items([item], client, DetailCache(path)) == first
+    client.fetch.assert_called_once()
+
+
+@pytest.mark.parametrize('minutes, expected', [(107, '1 h 47 min'), (133, '2 h 13 min'),
+                                               (60, '1 h 00 min'), (47, '47 min')])
+def test_movie_duration(minutes, expected, fixture_data):
+    from src.tracker import extract_duration
+    payload = fixture_data('detail_movie_v5.json')
+    payload['detail']['duration'] = minutes
+    assert extract_duration(payload) == expected
+
+
+@pytest.mark.parametrize('value', [None, True, 0, -1, '107', 107.5, [], {}, float('inf')])
+def test_unusable_duration(value):
+    from src.tracker import extract_duration
+    assert extract_duration({'detail': {'genre': 'Cinéma', 'duration': value}}) == ''
+
+
+@pytest.mark.parametrize('name', ['detail_movie.json', 'detail_show.json', 'detail_season.json'])
+def test_missing_duration(name, fixture_data):
+    from src.tracker import extract_duration
+    assert extract_duration(fixture_data(name)) == ''
+
+
+def test_series_duration_never_used():
+    from src.tracker import extract_duration
+    assert extract_duration({'detail': {'genre': 'Séries', 'duration': 107}}) == ''
+
+
+def test_legacy_cache_keeps_new_fields_empty(tmp_path, item):
+    cache = DetailCache(tmp_path / 'details.json')
+    cache.put(item.content_id, item.detail_url, date(2026, 9, 30))
+    del cache.entries[item.content_id]['duration']
+    del cache.entries[item.content_id]['availability_text']
+    cache.save()
+    client = Mock()
+    result = process_items([item], client, DetailCache(cache.path))[0]
+    assert result.duration == result.availability_text == ''
+    assert result.expiration == date(2026, 9, 30)
+    client.fetch.assert_not_called()

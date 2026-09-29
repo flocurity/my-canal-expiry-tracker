@@ -28,29 +28,33 @@ class DetailCache:
         except (OSError, ValueError) as exc:
             log.warning('cache_read_failed', path=str(path), reason=str(exc))
 
-    def get(self, content_id: str, url: str) -> tuple[bool, date | None, str]:
+    def get(self, content_id: str, url: str) -> tuple[bool, date | None, str, str, str]:
         entry = self.entries.get(content_id)
         if not content_id or not isinstance(entry, dict):
-            return False, None, ''
+            return False, None, '', '', ''
         try:
             retrieved = datetime.fromisoformat(entry['retrieved_at'])
             age = datetime.now(timezone.utc) - retrieved
             if not timedelta(0) <= age < self.lifetime or entry['url'] != url:
-                return False, None, ''
+                return False, None, '', '', ''
             raw_date = entry['expiration']
             expiration = date.fromisoformat(raw_date) if raw_date is not None else None
             if entry['status'] != ('OK' if expiration else 'Date inconnue'):
-                return False, None, ''
+                return False, None, '', '', ''
             # Older cache entries remain usable without an additional API call.
             subgenre = entry.get('subgenre')
             if not isinstance(subgenre, str) or not subgenre.strip():
                 subgenre = ''
-            return True, expiration, subgenre
+            duration = entry.get('duration', '')
+            availability_text = entry.get('availability_text', '')
+            return (True, expiration, subgenre,
+                    duration if isinstance(duration, str) else '',
+                    availability_text if isinstance(availability_text, str) else '')
         except (KeyError, ValueError, TypeError):
-            return False, None, ''
+            return False, None, '', '', ''
 
     def put(self, content_id: str, url: str, expiration: date | None,
-            subgenre: str = '') -> None:
+            subgenre: str = '', duration: str = '', availability_text: str = '') -> None:
         if not content_id:
             return
         self.entries[content_id] = {
@@ -58,6 +62,8 @@ class DetailCache:
             'url': url,
             'expiration': expiration.isoformat() if expiration else None,
             'subgenre': subgenre,
+            'duration': duration,
+            'availability_text': availability_text,
             'status': 'OK' if expiration else 'Date inconnue',
         }
         self.dirty = True

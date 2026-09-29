@@ -25,3 +25,10 @@ download availability omitted. Dates and availability semantics remain explicit;
 no raw API responses, real titles, content IDs or media URLs are stored here.
 
 Fixtures are local and static. Normal tests never fetch or regenerate them.
+
+
+`detail_movie_v5.json` is reduced from a successful public detailV5 movie response
+inspected on 2026-09-29. The title is fictional. The observed `detail.genre` was
+`Cinéma`, `detail.duration` was the integer `98`, and `detail.editorialTitle`
+contained `1h38`, confirming minutes. The timestamp and relevant metadata retain
+the observed values. No legacy duration field or series duration was inferred.

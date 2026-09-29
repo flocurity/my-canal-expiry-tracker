@@ -198,7 +198,8 @@ For example:
 
     "Dispo. jusqu'au 02/11/2026"
 
-Prefer `download.availabilityEndDate`.
+Prefer `detail.availabilityEndDate` for detailV5, then
+`download.availabilityEndDate` for legacy responses.
 
 If this field is missing, try to retrieve a usable date from the other availabilities, particularly `stream`, and then optionally parse a label such as:
 
@@ -212,11 +213,14 @@ Convert timestamps to the `Europe/Paris` local timezone, then use the resulting 
 
 ## Remaining days calculation
 
-Calculate:
+`Jours restants` is an Excel Table calculated column:
 
-    days_remaining = end_date - current_date
+    =IF([@[Fin de disponibilité]]="","",[@[Fin de disponibilité]]-TODAY())
 
-The calculation must be performed every time the Excel file is generated.
+Use English function names and commas in XlsxWriter. Excel recalculates on opening;
+`TODAY()` follows the Excel environment's current date. Unknown dates produce an
+empty string; zero and negative days remain numeric. Python may supply an initial
+cached preview, but the workbook value and row colors must update on recalculation.
 
 Do not use the myCANAL `lastDays` field to determine urgency. It appears much too late, and the purpose of this tool is specifically to anticipate that information.
 
@@ -234,6 +238,8 @@ Build a pandas DataFrame ideally containing the following columns:
 - `URL myCANAL`
 - `Content ID`
 - `Statut`
+- `Durée`
+- `Disponible jusqu’au`
 
 `Catégorie` may use `subtitle` when available.
 
@@ -254,6 +260,28 @@ For `URL myCANAL`, prefer a user-facing URL built from `onClick.path` if this pr
 - `Date inconnue`
 - `Erreur HTTP`
 - `Erreur parsing`
+
+
+### Duration and absolute availability text
+
+`Durée` uses the observed detailV5 `detail.duration` integer in minutes only when
+`detail.genre` is `Cinéma`. For example, 107 becomes `1 h 47 min`; 60 becomes
+`1 h 00 min`, and 47 becomes `47 min`. Series and unrecognized schemas stay blank;
+no episode aggregation or additional duration requests are made. Missing, non-integer,
+boolean and nonpositive durations stay blank. Legacy duration fields have not been
+verified and are not guessed.
+
+`Disponible jusqu’au` uses the same canonical timestamp selected for the date,
+interpreted as Unix milliseconds and explicitly converted to `Europe/Paris`.
+French weekday/month names are independent of system locale; the label has no year
+and uses a 24-hour clock with `h` (for example `mercredi 30 septembre 23h59`).
+This follows the required exact example rather than a colon separator.
+Relative API labels are never copied. Without a valid timestamp, including a
+label-only date fallback, this field stays blank. `Fin de disponibilité` remains
+a real Excel date.
+
+Both new fields are cached alongside the date. Older cache entries remain valid
+and leave these fields blank until normal expiry or `--refresh`.
 
 ## Sorting
 
@@ -317,14 +345,15 @@ Apply formatting to the entire row based on `Jours restants`.
 
 The ranges must be mutually exclusive:
 
-- 0 to 2 days inclusive: red
+- <= 2 days, including zero and negative values: red
 - 3 to 7 days inclusive: orange
 - 8 to 30 days inclusive: yellow
 - more than 30 days: no special color
 
 Do not color items with an unknown expiration date.
 
-If an item has an expiration date in the past, also use red or another clearly identifiable rule.
+Use formula rules referencing the dynamic `Jours restants` cell with an
+`ISNUMBER` guard. The color must update when Excel recalculates.
 
 Prefer XlsxWriter conditional-formatting mechanisms instead of manually calculating the color of each cell.
 

@@ -1,4 +1,4 @@
-"""Generate a filterable Excel availability table from freshly calculated dates."""
+"""Generate a filterable Excel availability table with dynamically recalculated remaining days."""
 
 from datetime import date
 from pathlib import Path
@@ -9,7 +9,13 @@ from src.expiration import days_remaining, paris_today
 from src.tracker import ContentResult
 
 COLUMNS = ['Titre', 'Catégorie', 'Sous-genre', 'Service', 'Fin de disponibilité', 'Jours restants',
-           "Dans l'offre", 'URL myCANAL', 'Content ID', 'Statut']
+           "Dans l'offre", 'URL myCANAL', 'Content ID', 'Statut', 'Durée', 'Disponible jusqu’au']
+
+
+DAYS_FORMULA = (
+    '=IF([[#This Row],[Fin de disponibilité]]="","",'
+    '[[#This Row],[Fin de disponibilité]]-TODAY())'
+)
 
 
 def build_dataframe(results: list[ContentResult], today: date | None = None) -> pd.DataFrame:
@@ -21,7 +27,7 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
             item.title, item.subtitle, result.subgenre, item.service, result.expiration,
             days_remaining(result.expiration, today),
             None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
-            item.web_url, item.content_id, result.status,
+            item.web_url, item.content_id, result.status, result.duration, result.availability_text,
         ])
     frame = pd.DataFrame(records, columns=COLUMNS)
     frame['Jours restants'] = pd.array(frame['Jours restants'], dtype='Int64')
@@ -46,11 +52,18 @@ def write_excel(
         columns = [{'header': name} for name in COLUMNS]
         columns[4]['format'] = date_format
         columns[5]['format'] = integer_format
+        columns[5]['formula'] = DAYS_FORMULA
         # Excel requires at least one data row even for an empty playlist table.
         last_row = max(1, len(frame))
         sheet.add_table(0, 0, last_row, len(COLUMNS) - 1, {
             'name': 'MaListe', 'columns': columns, 'style': 'Table Style Medium 2',
         })
+        # Supply useful cached previews; Excel recalculates the formula on opening.
+        for row, value in enumerate(frame['Jours restants'], start=1):
+            sheet.write_formula(row, 5, DAYS_FORMULA, integer_format,
+                                '' if pd.isna(value) else int(value))
+        if frame.empty:
+            sheet.write_formula(1, 5, DAYS_FORMULA, integer_format, '')
         sheet.freeze_panes(1, 0)
         for column, name in enumerate(COLUMNS):
             lengths = [len(name), *(len(str(value)) for value in frame[name] if pd.notna(value))]

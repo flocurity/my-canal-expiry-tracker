@@ -44,7 +44,14 @@ retrieved manually from your own myCANAL session using your browser's DevTools.
 3. Open the **Network** tab.
 4. Reload the **Mes Vidéos** page if necessary to capture its network requests.
 5. Filter the requests for `hodor` and locate the request returning the playlist
-   contents as JSON (usually named `<digits>.json`).
+   contents as JSON (usually named `<digits>.json`). JSON should contain
+    ``` json
+	"currentPage": {
+		"displayName": "Ma Playlist",
+		"path": "/mes-videos/my-playlist",
+        [...]
+	}
+    ```
 6. Open the response and save its JSON content to a file in `input/`, for example
    `input/page1.json`.
 7. If your playlist has grown beyond 100 items, scroll down to load the next page
@@ -126,17 +133,44 @@ even when it duplicates `Catégorie`; if neither value is usable, it stays blank
 the date without extra requests. Older cache entries stay valid and leave this
 column blank until their normal expiration or an explicit `--refresh`.
 
-The date comes first from `download.availabilityEndDate`, then another availability
+The date comes first from `detail.availabilityEndDate` (detailV5), then
+`download.availabilityEndDate`, then another availability
 timestamp (preferring `stream`), then a `Dispo. jusqu'au DD/MM/YYYY` label.
 Timestamps are milliseconds and are converted to `Europe/Paris` before extracting
-the calendar date. `Jours restants` is recalculated from today's Paris date every
-export, including cache hits; it is a snapshot, so rerun to update it. `lastDays`
+the calendar date. `Jours restants` is an Excel Table formula based on `TODAY()`,
+so it updates when Excel opens/recalculates the workbook. It returns blank for an
+unknown date, and can become zero or negative. Whole-row conditional formatting
+references this dynamic value with an `ISNUMBER` guard, preserving the thresholds
+above. Excel's `TODAY()` uses the date of the Excel environment. Python supplies
+only an initial cached preview. `lastDays`
 is never used. Text from the source is written as text, not Excel formulas.
 
 A show/season may lack its own availability date: it is then `Date inconnue`.
 V1 does not crawl episodes or infer a series expiration from episode dates.
 An empty playlist generates a Table with one blank data row (required by Excel).
 Close the workbook in Excel before regenerating it if your platform locks open files.
+
+
+### Duration and absolute availability text
+
+`Durée` uses the observed detailV5 `detail.duration` integer in minutes only when
+`detail.genre` is `Cinéma`. For example, 107 becomes `1 h 47 min`; 60 becomes
+`1 h 00 min`, and 47 becomes `47 min`. Series and unrecognized schemas stay blank;
+no episode aggregation or additional duration requests are made. Missing, non-integer,
+boolean and nonpositive durations stay blank. Legacy duration fields have not been
+verified and are not guessed.
+
+`Disponible jusqu’au` uses the same canonical timestamp selected for the date,
+interpreted as Unix milliseconds and explicitly converted to `Europe/Paris`.
+French weekday/month names are independent of system locale; the label has no year
+and uses a 24-hour clock with `h` (for example `mercredi 30 septembre 23h59`).
+This follows the required exact example rather than a colon separator.
+Relative API labels are never copied. Without a valid timestamp, including a
+label-only date fallback, this field stays blank. `Fin de disponibilité` remains
+a real Excel date.
+
+Both new fields are cached alongside the date. Older cache entries remain valid
+and leave these fields blank until normal expiry or `--refresh`.
 
 ## Tests
 
