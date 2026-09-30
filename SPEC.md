@@ -96,6 +96,7 @@ Keep at least the following fields for each item:
 - `altLogoChannel`
 - `isInOffer`
 - raw `duration` in milliseconds when present and usable
+- literal boolean `isCompleted` (only true excludes the matched series episode);
 - `seasonID`, `episodeID`, numeric `seasonNumber`/`episodeNumber` when present,
   and `userProgress` (never used to prorate backlog duration)
 - `onClick.path`
@@ -304,7 +305,7 @@ that playlist metadata is duplicated into the detail cache.
 
 Folder entries use the fresh playlist `seasonID` and `episodeID` as the authoritative
 resume point. Trustworthy episode numbers are a fallback for matching within the
-identified season; array position and `isCompleted` are not progression sources.
+identified season; array position and catalog `isCompleted` are not progression sources.
 A matching stable episode ID takes precedence over an episode number. A complete
 but unmatchable playlist point is not replaced by conflicting detail metadata.
 When playlist resume information is incomplete, use detailV5 primary-action
@@ -314,12 +315,22 @@ tracking). Conflicting partial playlist/detail coordinates are left unresolved.
 No `/me`, `URLPerso`, tokenPass or authenticated progression endpoint is used.
 
 `Épisode à reprendre` is `S{seasonNumber}E{episodeNumber}` for the safely matched
-catalog episode. It is immediately followed by numeric `Épisodes restants`, then
+catalog episode (or the first remaining episode when that episode is completed).
+It is immediately followed by numeric `Épisodes restants`, then
 `Durée`. Both new columns are blank for movies. Existing movie sourcing, numeric
 durations, expiration handling, Excel formulas and formatting are unchanged.
 
-Include the resume episode in full regardless of `userProgress`, all numerically
-later episodes in that season, and every episode in every later season. Ignore
+Include the resume episode in full unless the current playlist explicitly has
+literal boolean `isCompleted: true`; then exclude only that matched episode.
+Missing, false, null or malformed values mean not completed. `userProgress`
+never determines completion or prorates duration. Include all numerically later
+episodes in that season and every episode in every later season.
+Completion is current playlist state, never cached; changing it takes effect on
+fresh catalog cache hits without extra requests. Only remaining episodes contribute
+to expiration groups. If none remain after complete validation, retain one playlist
+row with blank resume/expiration fields, `Date inconnue`, zero remaining episodes
+and numeric zero duration. When completion excludes the matched episode, use the first actual remaining
+episode by season/episode number as the resume label, repeated on every group row. Ignore
 earlier seasons and episodes without fetching earlier catalogs to verify viewing
 history. Season and episode ordering uses structured numbers, not contiguous IDs,
 array order or descriptions. Duplicate/contradictory identities are rejected.

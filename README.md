@@ -167,7 +167,12 @@ is never used. Text from the source is written as text, not Excel formulas.
 For series, `Épisode à reprendre` shows the matched resume episode (for example
 `S3E3`), and `Épisodes restants` counts that episode and every later episode/season.
 Fresh playlist resume metadata wins over conflicting detail actions. The current
-episode counts in full, even when partially watched. Series produce one row per
+episode counts in full when partially watched; `userProgress` never determines
+completion or prorates duration. Only literal playlist `isCompleted: true` excludes
+the matched episode and advances the resume label to the first actual remaining
+episode, repeated on every expiration-group row. This fresh playlist state is never cached. If nothing remains,
+the series keeps one row with blank resume/expiration fields and numeric zero count
+and duration. Series produce one row per
 distinct remaining-episode expiration timestamp, plus one unknown-expiration row
 when needed. The title and series resume label repeat; `Épisodes restants` and
 numeric `Durée` cover only that row's episodes. A missing duration blanks only its

@@ -334,7 +334,8 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         raise ValueError('Resume episode not found safely')
     resume = matches[0]
     remaining = [(current.season.number, episode) for episode in current.episodes
-                 if episode.number >= resume.number]
+                 if episode.number > resume.number
+                 or (episode.number == resume.number and item.is_completed is not True)]
     resume_label = f'S{current.season.number}E{resume.number}'
     try:
         # The selector is catalog data, not user state. Cached selectors can therefore
@@ -384,4 +385,9 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
             ))
     except (DetailError, ValueError) as exc:
         raise SeriesIncomplete(exc, resume_label) from exc
-    return SeriesBacklog(resume_label, tuple(groups))
+    if remaining and item.is_completed is True:
+        season_number, episode = min(
+            remaining, key=lambda member: (member[0], member[1].number),
+        )
+        resume_label = f'S{season_number}E{episode.number}'
+    return SeriesBacklog(resume_label if remaining else '', tuple(groups))

@@ -454,3 +454,104 @@ def test_expiration_partition_rows_cache_and_excel(
             else:
                 assert cell.attrib.get('t', 'n') == 'n'
                 assert float(cell.find('m:v', ns).text) == pytest.approx(minutes / 1440)
+
+
+def test_playlist_completion_is_literal_boolean(tmp_path, fixture_data):
+    template = fixture_data('playlist.json')['contents'][1]
+    values = [True, False, None, 1, 'true', [], {}]
+    contents = []
+    for index, value in enumerate(values):
+        raw = deepcopy(template)
+        raw.update(contentID=f'completion_{index}', isCompleted=value, userProgress=98)
+        contents.append(raw)
+    missing = deepcopy(template)
+    missing['contentID'] = 'completion_missing'
+    missing.pop('isCompleted', None)
+    contents.append(missing)
+    (tmp_path / 'playlist.json').write_text(json.dumps({'contents': contents}))
+    assert [item.is_completed for item in load_playlist(tmp_path)] == [True] + [False] * 7
+
+
+def test_completion_changes_cached_groups_without_requests(tmp_path, series, client):
+    contents = client.fetch_episodes.return_value['episodes']['contents']
+    contents[2]['availabilityEndDate'] = 1790801940000
+    contents.reverse()
+    series = replace(series, is_completed=False, user_progress=98)
+    path = tmp_path / 'details.json'
+    first = process_items([series], client, DetailCache(path))
+    assert sum(r.episodes_remaining for r in first) == 9
+    assert sum(r.duration_minutes for r in first) == 211
+    assert len(first) == 2
+    saved = path.read_text()
+    client.reset_mock()
+    completed = process_items([replace(series, is_completed=True)], client, DetailCache(path))
+    assert len(completed) == 1
+    assert completed[0].episodes_remaining == 8
+    assert completed[0].duration_minutes == 190
+    assert completed[0].availability_end_date == 1790805540000
+    assert completed[0].resume_episode == 'S3E4'
+    assert path.read_text() == saved
+    # Completing the preceding episode leaves both timestamp groups; every row
+    # must show the earliest actual remainder, regardless of catalog array order.
+    split = process_items(
+        [replace(series, episode_id='squirtle_s3e2', is_completed=True)],
+        client, DetailCache(path),
+    )
+    assert len(split) == 2
+    assert {row.resume_episode for row in split} == {'S3E3'}
+    assert 'is_completed' not in saved and 'isCompleted' not in saved
+    assert process_items([series], client, DetailCache(path)) == first
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+
+
+@pytest.mark.parametrize('later_season', [False, True])
+def test_completed_final_episode_keeps_row_or_later_backlog(
+    tmp_path, series, client, fixture_data, later_season,
+):
+    from xml.etree import ElementTree as ET
+    from zipfile import ZipFile
+
+    from src.excel import write_excel
+
+    series = replace(series, episode_id='squirtle_s3e4', is_completed=True)
+    template = fixture_data('episodes_series.json')
+    seasons = [3, 5] if later_season else [3]
+    current = season_response(template, 3, ['50 min'] * 4, seasons)
+    current['episodes']['contents'][-1]['availabilityEndDate'] = 1790805540000
+    client.fetch_episodes.side_effect = [current] + (
+        [season_response(template, 5, ['21 min'] * 2, seasons)] if later_season else []
+    )
+    results = process_items([series], client, DetailCache(tmp_path / 'details.json'))
+    assert len(results) == 1
+    result = results[0]
+    assert result.episodes_remaining == (2 if later_season else 0)
+    assert result.duration_minutes == (42 if later_season else 0)
+    assert result.resume_episode == ('S5E1' if later_season else '')
+    assert result.availability_end_date == (1823119140000 if later_season else None)
+    assert client.fetch_episodes.call_count == (2 if later_season else 1)
+    if not later_season:
+        assert result.expiration is None and result.availability_text == ''
+        path = tmp_path / 'completed.xlsx'
+        frame = write_excel(results, path)
+        assert len(frame) == 1
+        assert frame['Durée'].tolist() == [0]
+        ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+        with ZipFile(path) as book:
+            sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
+            for ref in ('G2', 'H2'):
+                cell = sheet.find(f'.//m:c[@r="{ref}"]', ns)
+                assert cell.attrib.get('t', 'n') == 'n'
+                assert float(cell.find('m:v', ns).text) == 0
+            for ref in ('F2', 'M2'):
+                assert sheet.find(f'.//m:c[@r="{ref}"]/m:v', ns) is None
+            assert sheet.find('.//m:c[@r="D2"]/m:v', ns).text is None
+
+
+def test_movie_completion_does_not_change_report(tmp_path, item, client, fixture_data):
+    client.fetch.return_value = fixture_data('detail_movie_v5.json')
+    cache = DetailCache(tmp_path / 'details.json')
+    original = process_items([item], client, cache)[0]
+    completed_item = replace(item, is_completed=True)
+    completed = process_items([completed_item], client, cache)
+    assert completed == [replace(original, item=completed_item)]

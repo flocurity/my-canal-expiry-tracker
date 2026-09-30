@@ -114,6 +114,13 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
             status = 'Série incomplète' if item.content_type == 'folder' else 'Erreur parsing'
             log.error('content_failed', content_id=item.content_id, status=status, reason=str(exc))
         if backlog is not None:
+            if not backlog.groups:
+                # A validated empty backlog still represents a playlist item,
+                # but has no expiration group to report.
+                results.append(ContentResult(
+                    item, None, 'Date inconnue', subgenre,
+                    duration_minutes=0, episodes_remaining=0,
+                ))
             for group in backlog.groups:
                 expiration, availability_text = availability_from_raw(group.availability_end_date)
                 status = 'OK' if expiration else 'Date inconnue'

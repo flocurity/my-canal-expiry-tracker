@@ -32,6 +32,7 @@ class PlaylistItem:
     season_number: int | None = None
     episode_number: int | None = None
     user_progress: int | None = None
+    is_completed: bool = False
 
     @property
     def movie_duration_minutes(self) -> int | None:
@@ -138,6 +139,7 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
                 path=_text(click.get('path')),
                 detail_url=click['URLPage'],
                 supports_detail_v5=_declares_detail_v5(click.get('parameters')),
+                is_completed=raw.get('isCompleted') is True,
                 season_id=_text(raw.get('seasonID')),
                 episode_id=_text(raw.get('episodeID')),
                 season_number=_positive_number(raw.get('seasonNumber')),
