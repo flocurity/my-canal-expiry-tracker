@@ -3,19 +3,22 @@
 import json
 import os
 import tempfile
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from log import get_logger
-from src.detail import DetailData
+from src.timing import timeit
+from src.detail import DetailData, ResumeFallback
 from src.expiration import availability_from_raw
-from src.series import SeasonCatalog, identifier
+from src.series import SeasonCatalog, identifier, positive_number
 
 log = get_logger(__name__)
 CACHE_LIFETIME = timedelta(hours=24)
 
 
 class DetailCache:
+    @timeit()
     def __init__(self, path: Path, lifetime: timedelta = CACHE_LIFETIME) -> None:
         self.path = path
         self.lifetime = lifetime
@@ -81,6 +84,16 @@ class DetailCache:
             normalized['duration_minutes'] = minutes
         if season_id:
             normalized['season_content_id'] = season_id
+        fallback = entry.get('resume_fallback')
+        if isinstance(fallback, dict):
+            resume_season = identifier(fallback.get('season_id'))
+            episode_id = identifier(fallback.get('episode_id'))
+            episode_number = positive_number(fallback.get('episode_number'))
+            if resume_season and (episode_id or episode_number):
+                normalized['resume_fallback'] = asdict(ResumeFallback(
+                    resume_season, episode_id,
+                    positive_number(fallback.get('season_number')), episode_number,
+                ))
         return normalized
 
     def get(self, content_id: str, season_content_id: str = '') -> DetailData | None:
@@ -98,6 +111,8 @@ class DetailCache:
                 availability_label=entry.get('availability_label', ''),
                 subgenre=entry['subgenre'],
                 duration_minutes=entry.get('duration_minutes'),
+                resume_fallback=(ResumeFallback(**entry['resume_fallback'])
+                                 if 'resume_fallback' in entry else None),
             )
         except (KeyError, ValueError, TypeError):
             return None
@@ -113,6 +128,7 @@ class DetailCache:
             'subgenre': detail.subgenre,
             'duration_minutes': detail.duration_minutes,
             'season_content_id': season_content_id,
+            'resume_fallback': asdict(detail.resume_fallback) if detail.resume_fallback else None,
         })
         self.dirty = True
 

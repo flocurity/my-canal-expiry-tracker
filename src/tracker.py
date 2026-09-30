@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from log import get_logger
+from src.timing import timeit
 from src.cache import DetailCache
 from src.canal_api import CanalClient, DetailError, build_detail_url
 from src.detail import DetailData
@@ -53,6 +54,7 @@ def extract_duration(payload: dict) -> int | None:
     return minutes
 
 
+@timeit()
 def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailCache,
                   refresh: bool = False) -> list[ContentResult]:
     results = []

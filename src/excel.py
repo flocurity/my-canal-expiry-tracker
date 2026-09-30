@@ -8,6 +8,7 @@ from xlsxwriter.utility import xl_col_to_name
 
 from src.expiration import days_remaining, paris_today
 from src.tracker import ContentResult
+from src.timing import timeit
 
 COLUMNS = ['Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
            'Épisode à reprendre', 'Épisodes restants', 'Durée', 'Catégorie',
@@ -66,6 +67,7 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
                              kind='stable').reset_index(drop=True)
 
 
+@timeit()
 def write_excel(
     results: list[ContentResult], path: Path, today: date | None = None,
 ) -> pd.DataFrame:

@@ -173,8 +173,10 @@ valid timestamp among remaining episodes, or unknown if none is available.
 Catalogs use public `/episodes` URLs and the existing paced HTTP client, with about
 one request per missing/stale required season and no per-episode requests. Fresh
 catalogs are reusable after token or resume changes. One detail request may be needed
-for navigation or fallback resume state; no authenticated progression endpoint is
-used. URLs, progress and derived backlog values are never cached. Incomplete paging,
+for navigation or missing/expired fallback resume state. Canonical fallback season/
+episode IDs and numbers share the detail cache's existing TTL; explicit playlist
+state takes priority, and `--refresh` replaces the fallback. Fully cached runs reuse
+it without another detail request. No authenticated progression endpoint is used. URLs, progress and derived backlog values are never cached. Incomplete paging,
 missing navigation or an unmatched resume point produces blank uncertain values and
 `Série incomplète`; HTTP errors retain their existing status. A safely matched resume
 label is retained if a later-season fetch fails. See SPEC.md for exact cache and

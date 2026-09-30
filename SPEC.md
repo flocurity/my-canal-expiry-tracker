@@ -378,7 +378,7 @@ entries keyed `season:{playlist_content_id}:{season_id}`. Each entry contains:
   and nullable raw `availability_end_date` milliseconds.
 
 Store only validated complete catalogs, independently per season. Never persist
-resume position, progress, completion flags, action metadata, Hodor URLs/tokens,
+playlist resume state, progress, completion flags, action metadata, Hodor URLs/tokens,
 credentials or derived totals/display strings. Cache loading validates and
 whitelists catalog fields; invalid catalogs are misses. Existing movie entries
 remain compatible. Scalar series subgenre entries no longer need a season-bound
@@ -392,9 +392,15 @@ catalogs, including when the resume moves into a cached later season. With usabl
 playlist resume state and all needed catalogs fresh, no network request is required.
 Otherwise fetch approximately one catalog per missing/expired required season, plus
 at most one detail request to obtain current navigation. Without usable playlist
-resume state, fresh detail/action metadata is required for fallback on each run;
-that potentially user-specific state is not cached. `--refresh` bypasses catalog
-and scalar caches. Selectors refresh with their catalog TTL, so newly published
+resume state, reuse `resume_fallback` in the brand-level detail entry. It contains
+only `season_id`, `episode_id` and optional `season_number`/`episode_number` from
+detail navigation; it shares the entry's existing `retrieved_at` and 24-hour TTL.
+Usable explicit playlist state always wins. Missing/expired fallback requires detail;
+`--refresh` bypasses and replaces it. No separate TTL, fingerprint or invalidation
+rule is added. Old entries without fallback remain valid and acquire it when detail
+is needed. Fully cached catalogs plus fresh fallback need no network request; a
+catalog miss may still require fresh detail navigation because URLs are not cached.
+`--refresh` also continues to bypass catalog and scalar caches. Selectors refresh with their catalog TTL, so newly published
 seasons may require expiry or `--refresh` to become visible.
 
 Schema observations were verified with a small number of public detail/episodes

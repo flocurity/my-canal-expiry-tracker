@@ -4,8 +4,17 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class ResumeFallback:
+    season_id: str
+    episode_id: str = ''
+    season_number: int | None = None
+    episode_number: int | None = None
+
+
+@dataclass(frozen=True)
 class DetailData:
     availability_end_date: int | float | None = None
     availability_label: str = ''
     subgenre: str = ''
     duration_minutes: int | None = None
+    resume_fallback: ResumeFallback | None = None

@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from log import get_logger
+from src.timing import timeit
 
 log = get_logger(__name__)
 
@@ -89,6 +90,7 @@ def _declares_detail_v5(parameters: object) -> bool:
     return False
 
 
+@timeit()
 def load_playlist(directory: Path) -> list[PlaylistItem]:
     paths = sorted(directory.glob('*.json'))
     if not paths:

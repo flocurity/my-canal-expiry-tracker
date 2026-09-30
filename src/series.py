@@ -2,13 +2,15 @@
 
 import re
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from log import get_logger
+from src.timing import timeit
 from src.canal_api import CanalClient, DetailError, validate_api_url
 from src.expiration import availability_from_raw
+from src.detail import ResumeFallback
 from src.playlist import PlaylistItem
 
 if TYPE_CHECKING:
@@ -61,6 +63,7 @@ class SeasonCatalog:
                 'episodes': [asdict(episode) for episode in self.episodes]}
 
     @classmethod
+    @timeit()
     def from_cache(cls, raw: object) -> 'SeasonCatalog':
         if not isinstance(raw, dict):
             raise ValueError('Invalid season catalog')
@@ -251,18 +254,26 @@ def _legacy_selector(payload: dict | None) -> list | None:
     return None
 
 
+@timeit()
 def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
                   load_detail: Callable[[], dict], refresh: bool = False) -> SeriesBacklog:
     payload = None
     base_url = ''
     urls: dict[str, str] = {}
-
+    
     def navigation() -> tuple[str, str, int | None, int | None]:
         nonlocal payload, base_url
         if payload is None:
             payload = load_detail()
         result = _navigation(payload)
-        base_url = result[0]
+        base_url, episode_id, season_number, episode_number = result
+        season_id = _url_season(base_url)
+        if season_id and (episode_id or episode_number):
+            detail = cache.get(item.content_id)
+            if detail is not None:
+                cache.put(item.content_id, replace(detail, resume_fallback=ResumeFallback(
+                    season_id, episode_id, season_number, episode_number,
+                )))
         return result
 
     # Do not let a conflicting detail action replace even an unmatchable explicit
@@ -271,15 +282,20 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     episode_id = identifier(item.episode_id)
     season_number, episode_number = item.season_number, item.episode_number
     if not season_id or not (episode_id or episode_number):
-        url, fallback_id, fallback_season, fallback_episode = navigation()
-        if season_id and season_id != _url_season(url):
+        detail = None if refresh else cache.get(item.content_id)
+        fallback = detail.resume_fallback if detail is not None else None
+        if fallback is None:
+            url, fallback_id, fallback_season, fallback_episode = navigation()
+            fallback = ResumeFallback(_url_season(url), fallback_id,
+                                      fallback_season, fallback_episode)
+        if season_id and season_id != fallback.season_id:
             raise ValueError('Incomplete playlist resume point conflicts with detail')
-        if episode_id and fallback_id and episode_id != fallback_id:
+        if episode_id and fallback.episode_id and episode_id != fallback.episode_id:
             raise ValueError('Incomplete playlist resume point conflicts with detail')
-        season_id = season_id or _url_season(url)
-        episode_id = episode_id or fallback_id
-        season_number = season_number or fallback_season
-        episode_number = episode_number or fallback_episode
+        season_id = season_id or fallback.season_id
+        episode_id = episode_id or fallback.episode_id
+        season_number = season_number or fallback.season_number
+        episode_number = episode_number or fallback.episode_number
     if not season_id or not (episode_id or episode_number):
         raise ValueError('Missing usable resume season/episode')
 

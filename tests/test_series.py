@@ -162,6 +162,10 @@ def test_not_started_fallback_all_five_seasons(tmp_path, series, client, fixture
     assert result.episodes_remaining == 14
     assert result.duration_minutes == 593 + 4 * 91
     assert client.fetch_episodes.call_count == 5
+    client.reset_mock()
+    assert process_items([series], client, DetailCache(tmp_path / 'details.json'))[0] == result
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
 
 
 def test_single_season_and_unordered_episode_number_fallback(tmp_path, series, client, fixture_data):
@@ -295,3 +299,57 @@ def test_corrupt_cached_catalog_is_a_miss_without_retaining_urls(tmp_path, serie
     del raw['season:squirtle_brand:squirtle_s3']['catalog']['episodes'][0]['number']
     path.write_text(json.dumps(raw))
     assert DetailCache(path).get_season(series.content_id, series.season_id) is None
+
+
+def test_cached_detail_resume_fallback_request_counts(tmp_path, series, client):
+    path = tmp_path / 'details.json'
+    missing_resume = replace(series, season_id='', episode_id='', user_progress=None)
+    first = process_items([missing_resume], client, DetailCache(path))[0]
+    assert first.resume_episode == 'S3E1'
+    assert client.fetch.call_count == client.fetch_episodes.call_count == 1
+    entry = json.loads(path.read_text())[series.content_id]
+    assert entry['resume_fallback'] == {
+        'season_id': 'squirtle_s3', 'episode_id': 'squirtle_s3e1',
+        'season_number': 3, 'episode_number': 1,
+    }
+    assert set(entry) == {'retrieved_at', 'availability_end_date', 'subgenre', 'resume_fallback'}
+    assert 'https://' not in path.read_text()
+    assert 'a' * 32 not in path.read_text()
+    client.reset_mock()
+    assert process_items([missing_resume], client, DetailCache(path))[0] == first
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+    assert json.loads(path.read_text())[series.content_id]['retrieved_at'] == entry['retrieved_at']
+
+    # Explicit playlist progression overrides the cached S3E1 fallback immediately.
+    explicit = process_items([series], client, DetailCache(path))[0]
+    assert explicit.resume_episode == 'S3E3'
+    assert explicit.episodes_remaining == 9
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+
+    action = client.fetch.return_value['actionLayout']['primaryActions'][0]
+    action['onClick']['contentID'] = 'squirtle_s3e5'
+    action['tracking']['dataLayer']['episodeNumber'] = 5
+    refreshed = process_items([missing_resume], client, DetailCache(path), refresh=True)[0]
+    assert refreshed.resume_episode == 'S3E5'
+    assert refreshed.episodes_remaining == 7
+    assert client.fetch.call_count == client.fetch_episodes.call_count == 1
+    assert DetailCache(path).get(series.content_id).resume_fallback.episode_id == 'squirtle_s3e5'
+    client.reset_mock()
+    assert process_items([missing_resume], client, DetailCache(path))[0] == refreshed
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+
+
+def test_fallback_uses_existing_detail_ttl(tmp_path, series, client):
+    path = tmp_path / 'details.json'
+    series = replace(series, season_id='', episode_id='')
+    process_items([series], client, DetailCache(path))
+    cache = DetailCache(path)
+    cache.entries[series.content_id]['retrieved_at'] = (
+        datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    client.reset_mock()
+    process_items([series], client, cache)
+    client.fetch.assert_called_once()
+    client.fetch_episodes.assert_not_called()
