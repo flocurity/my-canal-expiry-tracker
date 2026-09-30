@@ -19,4 +19,5 @@ markers = ["integration: explicitly enabled public myCANAL API smoke tests"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
 ]
