@@ -157,11 +157,17 @@ def parse_catalog(payload: dict, season_id: str,
 
 
 @dataclass(frozen=True)
-class SeriesBacklog:
-    resume_episode: str
+class ExpirationGroup:
+    season_numbers: tuple[int, ...]
     episodes_remaining: int
     duration_minutes: int | None
     availability_end_date: int | float | None
+
+
+@dataclass(frozen=True)
+class SeriesBacklog:
+    resume_episode: str
+    groups: tuple[ExpirationGroup, ...]
 
 
 class SeriesIncomplete(DetailError):
@@ -327,7 +333,8 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     if len(matches) != 1:
         raise ValueError('Resume episode not found safely')
     resume = matches[0]
-    remaining = [episode for episode in current.episodes if episode.number >= resume.number]
+    remaining = [(current.season.number, episode) for episode in current.episodes
+                 if episode.number >= resume.number]
     resume_label = f'S{current.season.number}E{resume.number}'
     try:
         # The selector is catalog data, not user state. Cached selectors can therefore
@@ -346,7 +353,7 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
             later = catalog_for(season.content_id)
             if later.season != season:
                 raise ValueError('Conflicting season metadata')
-            remaining.extend(later.episodes)
+            remaining.extend((later.season.number, episode) for episode in later.episodes)
             visited.add(season.content_id)
             for discovered in later.seasons:
                 previous = known.get(discovered.content_id)
@@ -361,15 +368,20 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
                     if existing is not None and existing != discovered:
                         raise ValueError('Conflicting later season metadata')
                     pending[discovered.content_id] = discovered
-        episode_ids = [e.content_id for e in remaining if e.content_id]
+        episode_ids = [e.content_id for _, e in remaining if e.content_id]
         if len(set(episode_ids)) != len(episode_ids):
             raise ValueError('Episode repeated across remaining seasons')
-        minutes = None if any(e.duration_minutes is None for e in remaining) else sum(
-            e.duration_minutes for e in remaining
-        )
-        timestamps = [e.availability_end_date for e in remaining
-                      if e.availability_end_date is not None]
+        partitions: dict[int | float | None, list[tuple[int, Episode]]] = {}
+        for number, episode in remaining:
+            partitions.setdefault(episode.availability_end_date, []).append((number, episode))
+        groups = []
+        for timestamp, members in partitions.items():
+            minutes = (None if any(e.duration_minutes is None for _, e in members)
+                       else sum(e.duration_minutes for _, e in members))
+            groups.append(ExpirationGroup(
+                tuple(sorted({number for number, _ in members})),
+                len(members), minutes, timestamp,
+            ))
     except (DetailError, ValueError) as exc:
         raise SeriesIncomplete(exc, resume_label) from exc
-    return SeriesBacklog(resume_label, len(remaining),
-                         minutes, min(timestamps) if timestamps else None)
+    return SeriesBacklog(resume_label, tuple(groups))

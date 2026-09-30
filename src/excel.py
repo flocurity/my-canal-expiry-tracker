@@ -39,9 +39,23 @@ def excel_duration(result: ContentResult) -> float | str:
     return minutes / 1440
 
 
+def season_category(numbers: tuple[int, ...]) -> str:
+    if len(numbers) == 1:
+        return f'Saison {numbers[0]}'
+    if all(right == left + 1 for left, right in zip(numbers, numbers[1:])):
+        return f'Saisons {numbers[0]} à {numbers[-1]}'
+    return 'Saisons ' + ', '.join(str(number) for number in numbers)
+
+
 def build_dataframe(results: list[ContentResult], today: date | None = None) -> pd.DataFrame:
     today = today or paris_today()
     records = []
+    # Preserve date ordering for legacy date-only results, and order timestamp
+    # groups within the same local date by their exact expiration.
+    results = sorted(results, key=lambda result: (
+        result.expiration is None, result.expiration or date.max,
+        result.availability_end_date if result.availability_end_date is not None else float('-inf'),
+    ))
     for result in results:
         item = result.item
         records.append({
@@ -53,7 +67,8 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
             'Épisode à reprendre': result.resume_episode,
             'Épisodes restants': result.episodes_remaining,
             'Durée': excel_duration(result),
-            'Catégorie': item.subtitle,
+            'Catégorie': (season_category(result.season_numbers)
+                          if result.season_numbers else item.subtitle),
             "Dans l'offre": None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
             'URL myCANAL': item.web_url,
             'Content ID': item.content_id,

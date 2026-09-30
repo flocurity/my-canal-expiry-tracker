@@ -25,6 +25,8 @@ class ContentResult:
     availability_text: str = ''
     resume_episode: str = ''
     episodes_remaining: int | None = None
+    season_numbers: tuple[int, ...] = ()
+    availability_end_date: int | float | None = None
 
 
 def extract_subgenre(payload: dict) -> str:
@@ -66,6 +68,7 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
         resume_episode = ''
         episodes_remaining = None
         payload = None
+        backlog = None
         # Series-specific dates now live in season catalogs. Scalar series detail
         # enrichment (subgenre) is brand-level, independent of the resume season.
         resource_id = '' if item.content_type == 'folder' else item.season_content_id
@@ -94,9 +97,6 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
             if item.content_type == 'folder':
                 backlog = enrich_series(item, client, cache, load_detail, refresh)
                 resume_episode = backlog.resume_episode
-                episodes_remaining = backlog.episodes_remaining
-                duration_minutes = backlog.duration_minutes
-                expiration, availability_text = availability_from_raw(backlog.availability_end_date)
             else:
                 if detail is None:
                     load_detail()
@@ -113,9 +113,19 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
         except ValueError as exc:
             status = 'Série incomplète' if item.content_type == 'folder' else 'Erreur parsing'
             log.error('content_failed', content_id=item.content_id, status=status, reason=str(exc))
-        results.append(ContentResult(item, expiration, status, subgenre,
-                                     duration_minutes, availability_text,
-                                     resume_episode, episodes_remaining))
+        if backlog is not None:
+            for group in backlog.groups:
+                expiration, availability_text = availability_from_raw(group.availability_end_date)
+                status = 'OK' if expiration else 'Date inconnue'
+                results.append(ContentResult(
+                    item, expiration, status, subgenre, group.duration_minutes,
+                    availability_text, resume_episode, group.episodes_remaining,
+                    group.season_numbers, group.availability_end_date,
+                ))
+        else:
+            results.append(ContentResult(item, expiration, status, subgenre,
+                                         duration_minutes, availability_text,
+                                         resume_episode, episodes_remaining))
         log.info('content_processed', index=index, total=len(items), title=item.title,
                  expiration=expiration, status=status)
     cache.save()

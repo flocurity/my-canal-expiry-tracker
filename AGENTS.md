@@ -64,6 +64,22 @@ Normal tests must not make real network requests.
 - Run the complete normal test suite with `uv run pytest` before considering a task complete.
 - Run integration tests only when explicitly requested or when the task specifically requires validating behavior against the real API.
 
+## Test execution
+
+Do not run the full test suite as a baseline before making changes unless there
+is a concrete reason to suspect the working tree is already broken.
+
+Assume the existing suite passes when the previous task/run established that
+fact.
+
+During implementation, run focused tests for the affected area first.
+
+Run the full non-integration test suite once after the implementation is
+complete, before reporting completion.
+
+If the full suite fails, investigate and rerun only what is necessary until the
+final full-suite validation.
+
 ## Git and generated files
 
 - Do not commit or modify files outside the repository.

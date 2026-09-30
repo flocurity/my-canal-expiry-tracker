@@ -61,7 +61,10 @@ def test_duration_labels(label, expected):
 
 
 def test_playlist_wins_inclusive_resume_and_expiration(tmp_path, series, client):
-    result = process_items([series], client, DetailCache(tmp_path / 'details.json'))[0]
+    results = process_items([series], client, DetailCache(tmp_path / 'details.json'))
+    assert len(results) == 1
+    result = results[0]
+    assert result.season_numbers == (3,)
     assert result.resume_episode == 'S3E3'
     assert result.episodes_remaining == 9
     assert result.duration_minutes == 211
@@ -191,7 +194,7 @@ def test_missing_duration_leaves_total_blank_but_count_known(tmp_path, series, c
     assert result.expiration == date(2026, 9, 30)
 
 
-def test_missing_expiration_uses_known_remaining_dates_only(tmp_path, series, client):
+def test_missing_expiration_forms_separate_group(tmp_path, series, client):
     contents = client.fetch_episodes.return_value['episodes']['contents']
     for episode in contents[2:]:
         episode.pop('availabilityEndDate')
@@ -200,8 +203,13 @@ def test_missing_expiration_uses_known_remaining_dates_only(tmp_path, series, cl
     assert result.status == 'Date inconnue'
     assert result.episodes_remaining == 9
     contents[-1]['availabilityEndDate'] = 1790805540000
-    result = process_items([series], client, DetailCache(tmp_path / 'details.json'), refresh=True)[0]
-    assert result.expiration == date(2026, 9, 30)
+    results = process_items([series], client, DetailCache(tmp_path / 'details.json'), refresh=True)
+    assert len(results) == 2
+    unknown, known = results
+    assert unknown.expiration is None
+    assert unknown.episodes_remaining == 8
+    assert known.expiration == date(2026, 9, 30)
+    assert known.episodes_remaining == 1
 
 
 @pytest.mark.parametrize('problem', ['resume', 'selector', 'pagination', 'previous_page',
@@ -353,3 +361,96 @@ def test_fallback_uses_existing_detail_ttl(tmp_path, series, client):
     process_items([series], client, cache)
     client.fetch.assert_called_once()
     client.fetch_episodes.assert_not_called()
+
+
+@pytest.mark.parametrize('missing_duration', [False, True])
+def test_expiration_partition_rows_cache_and_excel(
+    tmp_path, series, client, fixture_data, missing_duration,
+):
+    from xml.etree import ElementTree as ET
+    from zipfile import ZipFile
+
+    from src.excel import COLUMNS, DAYS_FORMULA, write_excel
+
+    template = fixture_data('episodes_series.json')
+    catalogs = {n: season_response(template, n, ['21 min'] * 4, [3, 4, 5, 7])
+                for n in (3, 4, 5, 7)}
+    early = 1790801940000
+    late = 1790805540000  # Same Paris date, distinct exact timestamps.
+    for n, catalog in catalogs.items():
+        for episode in catalog['episodes']['contents']:
+            episode['availabilityEndDate'] = late if n in (4, 5) else early
+    catalogs[3]['episodes']['contents'][3]['availabilityEndDate'] = late
+    catalogs[7]['episodes']['contents'][-1]['availabilityEndDate'] = None
+    catalogs[5]['episodes']['contents'][-1]['availabilityEndDate'] = 'invalid'
+    if missing_duration:
+        catalogs[7]['episodes']['contents'][0]['durationLabel'] = 'unknown'
+    # Resolve S3E3 from detail, then exercise the cached fallback on the second run.
+    series = replace(series, season_id='', episode_id='')
+    action = client.fetch.return_value['actionLayout']['primaryActions'][0]
+    action['onClick']['contentID'] = 'squirtle_s3e3'
+    action['tracking']['dataLayer']['episodeNumber'] = 3
+
+    def fetch(url, content_id):
+        number = int(parse_qs(urlsplit(url).query)['seasonID'][0].removeprefix('squirtle_s'))
+        return catalogs[number]
+
+    client.fetch_episodes.side_effect = fetch
+    path = tmp_path / 'details.json'
+    results = process_items([series], client, DetailCache(path))
+    assert len(results) == 3
+    assert {r.resume_episode for r in results} == {'S3E3'}
+    assert {r.item.title for r in results} == {'Squirtle'}
+    groups = {r.availability_end_date: r for r in results}
+    assert set(groups) == {early, late, None}
+    assert [groups[t].episodes_remaining for t in (early, late, None)] == [4, 8, 2]
+    assert [groups[t].season_numbers for t in (early, late, None)] == [(3, 7), (3, 4, 5), (5, 7)]
+    assert groups[early].duration_minutes == (None if missing_duration else 84)
+    assert groups[late].duration_minutes == 168
+    assert groups[None].duration_minutes == 42
+    assert sum(r.episodes_remaining for r in results) == 14
+    if not missing_duration:
+        assert sum(r.duration_minutes for r in results) == 294
+    assert groups[None].expiration is None
+    assert groups[None].availability_text == ''
+    assert groups[None].status == 'Date inconnue'
+    assert groups[early].expiration == groups[late].expiration == date(2026, 9, 30)
+    assert client.fetch.call_count == 1
+    assert client.fetch_episodes.call_count == 4
+    saved = path.read_text()
+    assert all(value not in saved for value in ('https://', 'Saisons', 'groups', 'episodes_remaining'))
+    client.reset_mock()
+    assert process_items([series], client, DetailCache(path)) == results
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+    assert path.read_text() == saved
+    assert process_items([series], client, DetailCache(path), refresh=True) == results
+    assert client.fetch.call_count == 1
+    assert client.fetch_episodes.call_count == 4
+
+    output = tmp_path / 'groups.xlsx'
+    frame = write_excel(list(reversed(results)), output, date(2026, 9, 29))
+    assert frame.columns.tolist() == COLUMNS
+    assert frame['Catégorie'].tolist() == ['Saisons 3, 7', 'Saisons 3 à 5', 'Saisons 5, 7']
+    assert frame['Épisode à reprendre'].tolist() == ['S3E3'] * 3
+    assert frame["Disponible jusqu'au"].iloc[:2].tolist() == [
+        groups[early].availability_text, groups[late].availability_text,
+    ]
+    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    with ZipFile(output) as book:
+        sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
+        table = ET.fromstring(book.read('xl/tables/table1.xml'))
+        assert table.attrib['ref'] == 'A1:N4'
+        assert sheet.find('m:conditionalFormatting', ns).attrib['sqref'] == 'A2:N4'
+        assert all('ISNUMBER($D2)' in f.text for f in sheet.findall('.//m:cfRule/m:formula', ns))
+        for row in range(2, 5):
+            assert sheet.find(f'.//m:c[@r="D{row}"]/m:f', ns).text == DAYS_FORMULA[1:]
+        assert sheet.find('.//m:c[@r="D4"]/m:v', ns).text is None
+        assert sheet.find('.//m:c[@r="M4"]/m:v', ns) is None
+        for row, minutes in ((2, None if missing_duration else 84), (3, 168), (4, 42)):
+            cell = sheet.find(f'.//m:c[@r="H{row}"]', ns)
+            if minutes is None:
+                assert cell is None or cell.find('m:v', ns) is None
+            else:
+                assert cell.attrib.get('t', 'n') == 'n'
+                assert float(cell.find('m:v', ns).text) == pytest.approx(minutes / 1440)

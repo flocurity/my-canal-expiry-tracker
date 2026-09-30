@@ -252,7 +252,7 @@ Build a pandas DataFrame ideally containing the following columns:
 when the first value is missing, null, non-string, empty or whitespace-only.
 Preserve the selected string unchanged; if neither is usable, keep it empty.
 It may duplicate `Catégorie`, which
-continues to use playlist metadata. Cache this value with the raw timestamp;
+uses playlist metadata except for series expiration groups, whose seasons it describes. Cache this value with the raw timestamp;
 raw cache entries without this optional field remain valid and export an empty value.
 
 `Service` corresponds to `altLogoChannel`.
@@ -342,18 +342,23 @@ constructed from tokens, no per-episode requests are made, and traversal stops w
 an explicit incomplete result if it would exceed 100 seasons.
 
 Parse duration labels such as `57 min`, `1h02`, `1h31` (also accepting spaces around
-units) into canonical whole minutes. One missing/unparseable remaining duration
-makes the total duration blank; the known episode count and expiration can still be
-reported. Earlier episodes with missing durations do not affect the remaining total.
-Excel stores the sum as minutes / 1440 with `[h]" h "mm" min"` formatting.
+units) into canonical whole minutes. Partition the complete remaining backlog by
+exact canonical raw `availabilityEndDate`, across seasons. Different timestamps
+remain separate even on the same Paris date; missing/invalid timestamps form one
+unknown group with blank expiration fields and `Date inconnue`.
 
-Use the earliest valid raw `availabilityEndDate` among remaining episodes only.
-Missing/invalid timestamps are ignored; if none is valid, use `Date inconnue` and
-blank expiration fields. This is the earliest **known** expiration, not a guarantee
-that episodes with missing timestamps have no earlier expiry. Reuse the existing
-Europe/Paris conversion and dynamic `Jours restants` formula without another date
-formatter. Do not use relative labels or series-level dates to replace missing
-episode expiration data.
+Emit one report row per group, keeping the title and series-level
+`Épisode à reprendre` identical. `Épisodes restants` and `Durée` describe only that
+group: each episode belongs to exactly one row. One unusable duration blanks only
+its group's duration. Excel stores sums as minutes / 1440 with
+`[h]" h "mm" min"` formatting. `Catégorie` describes actual structured season
+numbers: `Saison 3`, `Saisons 4 à 5`, or `Saisons 3, 5` for non-contiguous seasons.
+Rows sort by expiration, including exact timestamps within a date, unknowns last.
+
+Reuse Europe/Paris conversion and the dynamic `Jours restants` formula. No relative
+label or series-level date replaces missing episode timestamps. Groups are derived
+only after complete catalog validation, never cached, and require no extra requests.
+Movie rows, fallback-resume caching and conservative incomplete results are unchanged.
 
 ### Catalog completeness and cache
 

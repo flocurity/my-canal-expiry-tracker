@@ -144,7 +144,8 @@ The regenerated file is `output/ma-liste-canal.xlsx`, with one `Ma liste` sheet:
 Column order: `Titre`, `Sous-genre`, `Service`, `Jours restants`,
 `Disponible jusqu'au`, `Épisode à reprendre`, `Épisodes restants`, `Durée`, `Catégorie`, `Dans l'offre`, `URL myCANAL`,
 `Content ID` (hidden), `Fin de disponibilité`, `Statut`.
-`Catégorie` still comes from playlist metadata. `Sous-genre` uses `detail.subgenre`
+`Catégorie` comes from playlist metadata except for series groups, where it describes
+the represented seasons. `Sous-genre` uses `detail.subgenre`
 first, falling back to `tracking.dataLayer.subgenre` when the first value is missing,
 null, non-string, empty or whitespace-only. The selected string is preserved unchanged,
 even when it duplicates `Catégorie`; if neither value is usable, it stays blank. It is cached alongside
@@ -166,9 +167,14 @@ is never used. Text from the source is written as text, not Excel formulas.
 For series, `Épisode à reprendre` shows the matched resume episode (for example
 `S3E3`), and `Épisodes restants` counts that episode and every later episode/season.
 Fresh playlist resume metadata wins over conflicting detail actions. The current
-episode counts in full, even when partially watched. `Durée` sums remaining episode
-durations; one missing duration leaves the total blank. Expiration is the earliest
-valid timestamp among remaining episodes, or unknown if none is available.
+episode counts in full, even when partially watched. Series produce one row per
+distinct remaining-episode expiration timestamp, plus one unknown-expiration row
+when needed. The title and series resume label repeat; `Épisodes restants` and
+numeric `Durée` cover only that row's episodes. A missing duration blanks only its
+group's sum. `Catégorie` describes the represented seasons (for example `Saison 3`,
+`Saisons 4 à 5`, or `Saisons 3, 5`). Exact timestamps remain separate even on the
+same date. Groups use existing catalogs without extra requests or cached display
+state; incomplete backlogs still produce no partial totals.
 
 Catalogs use public `/episodes` URLs and the existing paced HTTP client, with about
 one request per missing/stale required season and no per-episode requests. Fresh
@@ -199,7 +205,7 @@ When playlist movie duration is missing/unusable, the verified detailV5 fallback
 may be cached as `duration_minutes`; it also identifies a movie when playlist category
 metadata is missing. A usable current playlist duration takes priority over this
 fallback. For example, 107 minutes becomes `1 h 47 min`, 60 becomes `1 h 00 min`,
-and 47 becomes `0 h 47 min`. Series use total remaining episode duration as described
+and 47 becomes `0 h 47 min`. Series use each row's remaining episode duration as described
 above. No per-episode detail requests are made for duration. Missing, non-integer,
 boolean and nonpositive values are unusable. Unverified legacy duration fields are
 not guessed.
