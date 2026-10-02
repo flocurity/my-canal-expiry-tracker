@@ -1,6 +1,6 @@
 # myCANAL Expiry Tracker
 
-A small personal Python tool that reads manually exported myCANAL playlists,
+A small personal Python tool that reads exported myCANAL playlists,
 retrieves public content details, and regenerates a sortable Excel availability
 report. Requires Python 3.11 or newer and `uv`.
 
@@ -15,15 +15,14 @@ uv run python main.py
 ```
 
 Place all playlist page responses in `input/` as `.json` files. These files are
-**manually retrieved from your own myCANAL account using browser DevTools**.
+**retrieved from your own myCANAL account**, manually or with `--getinfo`.
 See [**Retrieving the playlist inputs**](#retrieving-the-playlist-inputs)
-The program does not retrieve the authenticated playlist or attempt to bypass
-playlist authentication. Personal exports, cache files, and generated workbooks
+The program never implements login or bypasses playlist authentication. Personal exports, cache files, and generated workbooks
 are ignored by Git; `uv.lock` is intended to be versioned.
 
 All JSON files must contain a top-level object with a `contents` array. Minified
 JSON is accepted. Every file is validated before any API calls or output changes;
-invalid files produce a clear error and exit code 1. Inputs are never rewritten.
+invalid files produce a clear error and exit code 1. Normal report generation never rewrites inputs.
 An empty array is valid; no JSON files is an error.
 
 Pages are read in filename order. Usable items need a nonempty `onClick.URLPage`.
@@ -35,8 +34,35 @@ without detail URLs are skipped with a warning.
 
 ## Retrieving the playlist inputs
 
-The tracker does not authenticate to myCANAL itself. Playlist responses must be
-retrieved manually from your own myCANAL session using your browser's DevTools.
+The tracker does not log into myCANAL itself. You can acquire the playlist using
+your existing browser session:
+
+1. Log into myCANAL normally and open **Mes Vidéos**.
+2. In Firefox DevTools → **Network**, find the authenticated Hodor playlist request
+   (the page endpoint ending in `103412.json`).
+3. Choose **Copy as cURL**.
+4. Run `uv run python main.py --getinfo`.
+5. Paste the complete request into the multiline prompt, then press **Esc**, then **Enter**.
+
+**The copied request contains sensitive authentication data. Do not share, commit
+or save it.** Paste it only into the running application's prompt, never a shell.
+The application parses it as text, sends only the required authentication/profile
+headers, and never saves or logs the request or those headers. API-returned
+tokenized URLs remain in the raw export; keep these private files out of Git.
+
+Acquisition uses existing pacing/retries and follows server cursors for at most
+five pages / 500 entries. It saves each original decompressed JSON body unchanged
+as `input/YYYY-MM-DD.HH-MM.json`, then `.page2.json`, etc., using one Paris
+timestamp. It does not generate a workbook; run `uv run python main.py` afterward.
+
+Only a complete validated acquisition archives active `*.json` to `.json.bak`.
+An existing backup collision aborts without overwriting it; move that backup
+yourself before retrying. Fetch/validation failures leave the old export untouched.
+Publication stages files and rolls back ordinary filesystem failures; it is not
+a crash-atomic multi-file transaction. Run one exporter at a time. Responses
+echoing authentication data are refused rather than redacted.
+
+Manual DevTools response export remains supported:
 
 1. Sign in to myCANAL in your browser and open the **Mes Vidéos** page containing
    your playlist.

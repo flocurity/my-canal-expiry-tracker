@@ -1,4 +1,4 @@
-"""Conservative, sequential access to public myCANAL detail endpoints."""
+"""Conservative, sequential Hodor transport shared by reports and acquisition."""
 
 import math
 import random
@@ -110,6 +110,28 @@ class CanalClient:
         return self._fetch(url, content_id, 'episodes')
 
     def _fetch(self, url: str, content_id: str, resource: str) -> dict:
+        response = self._request(url, content_id, resource)
+        try:
+            try:
+                payload = response.json()
+            except ValueError:
+                raise DetailError('Response is not valid JSON', 'Erreur parsing') from None
+            if not isinstance(payload, dict) or not isinstance(payload.get(resource), dict):
+                raise DetailError(f'Missing or invalid {resource} object', 'Erreur parsing')
+            return payload
+        finally:
+            response.close()
+
+    def fetch_playlist_page(self, url: str, headers: dict[str, str]) -> bytes:
+        """Return the decompressed response bytes without reserializing JSON."""
+        response = self._request(url, '', 'page', headers)
+        try:
+            return response.content
+        finally:
+            response.close()
+
+    def _request(self, url: str, content_id: str, resource: str,
+                 headers: dict[str, str] | None = None) -> requests.Response:
         validate_api_url(url, resource)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if self._has_requested:
@@ -118,28 +140,21 @@ class CanalClient:
             self._has_requested = True
             try:
                 # Redirects must not turn a validated public URL into another target.
-                response = self.session.get(url, timeout=TIMEOUT_SECONDS, allow_redirects=False)
+                options = {'headers': headers} if headers is not None else {}
+                response = self.session.get(
+                    url, timeout=TIMEOUT_SECONDS, allow_redirects=False, **options,
+                )
             except (requests.Timeout, requests.ConnectionError) as exc:
                 reason = type(exc).__name__
                 status_code = None
                 retry_after = None
             except requests.RequestException as exc:
-                raise DetailError(type(exc).__name__) from exc
+                raise DetailError(type(exc).__name__) from None
             else:
                 status_code = response.status_code
+                if status_code == 200:
+                    return response
                 try:
-                    if status_code == 200:
-                        try:
-                            payload = response.json()
-                        except ValueError as exc:
-                            raise DetailError(
-                                'Response is not valid JSON', 'Erreur parsing'
-                            ) from exc
-                        if not isinstance(payload, dict) or not isinstance(
-                            payload.get(resource), dict
-                        ):
-                            raise DetailError(f'Missing or invalid {resource} object', 'Erreur parsing')
-                        return payload
                     if status_code not in RETRY_STATUSES:
                         raise DetailError(f'HTTP {status_code}')
                     reason = f'HTTP {status_code}'

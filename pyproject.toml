@@ -5,6 +5,7 @@ description = "Export manually retrieved myCANAL playlists with availability dat
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=3.0.6",
+    "prompt-toolkit>=3.0.53",
     "requests>=2.34.2",
     "structlog>=26.1.0",
     "xlsxwriter>=3.2.9",

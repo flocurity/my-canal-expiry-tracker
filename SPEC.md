@@ -4,15 +4,53 @@ I want to create a small Python tool that generates an Excel file from my myCANA
 
 ## General principle
 
-The API used to retrieve my playlist directly requires authentication and currently returns HTTP 403 when called outside the browser.
+The report reads raw playlist responses from `input/*.json`. Manual DevTools
+exports remain supported; optional `--getinfo` acquires them using transient
+request context copied from the user's authenticated browser session. The
+application implements no login or authentication bypass.
 
-For this first version, I deliberately do NOT want to automate this part.
+## Optional raw acquisition (`--getinfo`)
 
-I will manually retrieve the JSON responses for my playlist from the browser DevTools and place them in an `input/` directory.
+Use a native `prompt_toolkit.prompt(..., multiline=True)` for Firefox Copy-as-cURL
+from Mes Vidéos. Submit with Esc, then Enter; pass the returned text unchanged to
+the existing parser.
+Parse it with shell-style tokenization only; never execute shell code or curl.
+Accept a GET HTTPS Hodor `/api/v2/mycanal/page/<token>/103412.json` request,
+currently validating the observed 32 hexadecimal character token shape. Require
+nonempty case-insensitive `tokenPass` and `xx-profile-id` headers. Reject
+ambiguous URLs/required headers, unsupported options or request contexts before
+network or filesystem changes. Ignore other copied headers/cookies; retain only
+the required in-memory context. Do not store or log the pasted text, credentials
+or extracted path token. Per user clarification, API-returned tokenized URLs
+remain untouched inside raw exports. Refuse bodies echoing authentication
+headers/values rather than modifying them.
 
-There may be multiple JSON files corresponding to multiple playlist pages (no limit, can be 1 or 10)
+Use the existing Hodor client transport, Firefox User-Agent, gzip/deflate,
+timeouts, pacing and retries, with request-scoped authentication headers and no
+redirects. Request page 103412 with `maxContentRemaining=500`, `get=100`,
+`featureToggles=detailLight`. First request has no `after`; subsequent requests
+use exactly the preceding top-level `paging.idEnd`. Require a top-level
+`contents` array and boolean `paging.hasNextPage`. Stop on false; reject
+missing/invalid/repeated cursors, malformed responses, more than 100 entries per
+page, more than 500 entries total, or a fifth page still indicating continuation.
+Never derive cursors or query an authenticated progression endpoint.
 
-The program must automatically read all `.json` files present in `input/`.
+Hold all original decompressed response bytes in memory until complete. Do not
+merge, reconstruct, normalize or reserialize them. Save one file per response,
+with a common Europe/Paris timestamp: `YYYY-MM-DD.HH-MM.json`,
+`YYYY-MM-DD.HH-MM.page2.json`, etc. Stage all files before archiving existing
+active `*.json` as `.json.bak`. Existing backups are ignored as inputs and never
+overwritten: a backup collision aborts with a safe error. Publication uses
+same-filesystem no-overwrite moves and rollback on ordinary I/O errors; it cannot
+promise atomicity across a process crash or failed rollback. Run one exporter at
+a time. Acquisition/validation failure makes no changes to the old active inputs.
+No detail/season cache or report is touched by acquisition.
+
+Log page numbers/counts and safe failure categories, never sensitive request
+data or response contents. The command exits with code 1 on failure and 0 on
+success. Normal tests use synthetic requests and mocked HTTP only. The page ID,
+cursor layout and five-page limit follow user-observed API behavior; there is no
+live API validation in the offline tests.
 
 ## Desired structure
 
@@ -75,7 +113,7 @@ For each file:
 
 A formatting style such as minified one-line JSON is valid and must be accepted as-is.
 
-Do not modify, reformat, or overwrite the input files.
+Normal report generation must not modify, reformat, or overwrite input files.
 
 If any input file is invalid or structurally unusable, fail clearly before making API calls or generating the Excel file.
 
@@ -661,7 +699,8 @@ The fictional values must not change the semantics being tested. For example, ti
 
 Once created, normal unit tests must use these local fixtures/mocks and must not call the real API to regenerate them automatically.
 
-Real API access should remain limited to the explicitly marked integration tests and the manual API/rate-limit tooling.
+Automated tests access the real API only through explicitly marked integration tests;
+normal application requests and manually invoked acquisition/rate-limit tooling are separate.
 
 ## A few real API integration tests
 
@@ -740,7 +779,7 @@ Document:
 9. how to run the normal mocked/unit test suite;
 10. how to explicitly run the small real-API integration test suite.
 
-The README must clearly state that the playlist JSON files are manually retrieved from my own myCANAL account and that the program does not attempt to bypass playlist authentication.
+The README must describe manual export and optional `--getinfo` using the user's existing browser session, without login or authentication bypass.
 
 ## First step
 
