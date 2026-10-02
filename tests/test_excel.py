@@ -5,8 +5,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from src.excel import build_dataframe, write_excel
-from src.tracker import ContentResult
+from mycanal_expiry_tracker.excel import build_dataframe, write_excel
+from mycanal_expiry_tracker.tracker import ContentResult
 
 NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 

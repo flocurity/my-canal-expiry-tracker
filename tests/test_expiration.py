@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.expiration import days_remaining, extract_expiration
+from mycanal_expiry_tracker.expiration import days_remaining, extract_expiration
 
 
 def response(options):
@@ -113,7 +113,7 @@ def test_documentary_timestamp_with_nondated_label(fixture_data):
 @pytest.mark.parametrize('machine_timezone', ['UTC', 'America/Los_Angeles', 'Asia/Tokyo'])
 def test_absolute_availability_paris_regression(monkeypatch, machine_timezone):
     import time
-    from src.expiration import extract_availability
+    from mycanal_expiry_tracker.expiration import extract_availability
     if not hasattr(time, 'tzset'):
         pytest.skip('tzset unavailable')
     with monkeypatch.context() as context:
@@ -129,7 +129,7 @@ def test_absolute_availability_paris_regression(monkeypatch, machine_timezone):
 
 
 def test_absolute_label_uses_same_timestamp_priority():
-    from src.expiration import extract_availability
+    from mycanal_expiry_tracker.expiration import extract_availability
     payload = response({'download': {'availabilityEndDate': 1790805540000},
                         'stream': {'availabilityEndDate': 1793660340000, 'label': 'demain 23h59'}})
     assert extract_availability(payload)[1] == 'mercredi 30 septembre 23h59'
@@ -139,11 +139,11 @@ def test_absolute_label_uses_same_timestamp_priority():
 
 @pytest.mark.parametrize('name', ['detail_show.json', 'detail_stream_label.json'])
 def test_no_timestamp_means_no_absolute_label(name, fixture_data):
-    from src.expiration import extract_availability
+    from mycanal_expiry_tracker.expiration import extract_availability
     assert extract_availability(fixture_data(name))[1] == ''
 
 
 @pytest.mark.parametrize('value', [None, True, '1790805540000', float('nan'), 10 ** 1000])
 def test_invalid_timestamp_has_no_absolute_label(value):
-    from src.expiration import extract_availability
+    from mycanal_expiry_tracker.expiration import extract_availability
     assert extract_availability({'detail': {'availabilityEndDate': value}}) == (None, '')

@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-import main
+from mycanal_expiry_tracker import cli as main
 
 
 def test_invalid_input_prevents_api_and_output(tmp_path, monkeypatch):

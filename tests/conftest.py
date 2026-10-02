@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from src.playlist import PlaylistItem
+from mycanal_expiry_tracker.playlist import PlaylistItem
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 

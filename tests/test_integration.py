@@ -5,9 +5,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from src.canal_api import CanalClient, build_detail_url
-from src.expiration import extract_expiration
-from src.playlist import load_playlist
+from mycanal_expiry_tracker.canal_api import CanalClient, build_detail_url
+from mycanal_expiry_tracker.expiration import extract_expiration
+from mycanal_expiry_tracker.playlist import load_playlist
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[1]

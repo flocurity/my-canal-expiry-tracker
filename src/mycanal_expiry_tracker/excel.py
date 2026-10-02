@@ -6,9 +6,9 @@ from pathlib import Path
 import pandas as pd
 from xlsxwriter.utility import xl_col_to_name
 
-from src.expiration import days_remaining, paris_today
-from src.tracker import ContentResult
-from src.timing import timeit
+from mycanal_expiry_tracker.expiration import days_remaining, paris_today
+from mycanal_expiry_tracker.tracker import ContentResult
+from mycanal_hodor_core.timing import timeit
 
 COLUMNS = ['Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
            'Épisode à reprendre', 'Épisodes restants', 'Durée', 'Catégorie',

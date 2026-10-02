@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from src.playlist import PlaylistError, load_playlist
+from mycanal_expiry_tracker.playlist import PlaylistError, load_playlist
 
 
 def test_load_merge_deduplicate_optional_fields(tmp_path, fixture_data):

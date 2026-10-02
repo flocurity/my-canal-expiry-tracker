@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from log import get_logger
-from src.timing import timeit
+from mycanal_hodor_core.logging import get_logger
+from mycanal_hodor_core.timing import timeit
+
+from mycanal_hodor_core.detail import declares_detail_v5 as _declares_detail_v5
 
 log = get_logger(__name__)
 
@@ -73,22 +75,6 @@ def _text(value: object) -> str:
 
 def _positive_number(value: object) -> int | None:
     return value if type(value) is int and value > 0 else None
-
-
-def _declares_detail_v5(parameters: object) -> bool:
-    if not isinstance(parameters, list):
-        return False
-    for parameter in parameters:
-        if not isinstance(parameter, dict):
-            continue
-        values = parameter.get('enum')
-        if (parameter.get('in') == 'parameters'
-                and parameter.get('id') == 'featureToggles'
-                and isinstance(values, list)
-                and all(isinstance(value, str) for value in values)
-                and 'detailV5' in values):
-            return True
-    return False
 
 
 @timeit()

@@ -7,12 +7,12 @@ import pytest
 import requests
 from structlog.testing import capture_logs
 
-import main
-from src.acquisition import (
+from mycanal_expiry_tracker import cli as main
+from mycanal_expiry_tracker.acquisition import (
     AcquisitionError, acquire_pages, parse_curl, publish_pages, read_curl,
 )
-from src.canal_api import CanalClient, DetailError
-from src.playlist import load_playlist
+from mycanal_expiry_tracker.canal_api import CanalClient, DetailError
+from mycanal_expiry_tracker.playlist import load_playlist
 
 TOKEN = 'a' * 32
 AUTH = 'FAKE_AUTH_NOT_VALID'
@@ -101,7 +101,7 @@ def test_read_multiline_paste(monkeypatch):
     assert len(pasted) > 2048
     assert len(long_token) > 1800
     prompt = Mock(return_value=pasted)
-    monkeypatch.setattr('src.acquisition.prompt_toolkit.prompt', prompt)
+    monkeypatch.setattr('mycanal_expiry_tracker.acquisition.prompt_toolkit.prompt', prompt)
     received = read_curl()
     assert received == pasted
     prompt.assert_called_once_with('> ', multiline=True)
@@ -193,7 +193,7 @@ def test_backup_collision_preserves_both_files(cli):
 
 
 def test_publish_failure_rolls_back(tmp_path, monkeypatch):
-    import src.acquisition as acquisition
+    import mycanal_expiry_tracker.acquisition as acquisition
     (tmp_path / 'old.json').write_bytes(b'old')
     move = acquisition._move_without_overwrite
 
@@ -209,7 +209,7 @@ def test_publish_failure_rolls_back(tmp_path, monkeypatch):
 
 
 def test_shared_transport_retries_without_sensitive_logging(monkeypatch):
-    monkeypatch.setattr('src.canal_api.time.sleep', lambda _: None)
+    monkeypatch.setattr('mycanal_hodor_core.http.time.sleep', lambda _: None)
     responses = [Mock(status_code=429, headers={'Retry-After': '0'}),
                  Mock(status_code=200, content=raw_page())]
     with CanalClient(delay=0) as api:

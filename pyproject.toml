@@ -1,9 +1,13 @@
 [project]
 name = "my-canal-expiry-tracker"
 version = "0.1.0"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 description = "Export manually retrieved myCANAL playlists with availability dates to Excel"
 requires-python = ">=3.11"
 dependencies = [
+    "mycanal-hodor-core>=0.1,<0.2",
     "pandas>=3.0.6",
     "prompt-toolkit>=3.0.53",
     "requests>=2.34.2",
@@ -13,7 +17,7 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 addopts = '-m "not integration"'
 markers = ["integration: explicitly enabled public myCANAL API smoke tests"]
 
@@ -22,3 +26,18 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
 ]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mycanal_expiry_tracker*"]
+
+[project.scripts]
+mycanal-expiry-tracker = "mycanal_expiry_tracker.cli:run"
+
+# Development only: wheel metadata retains the versioned dependency above.
+[tool.uv.sources]
+mycanal-hodor-core = { path = "../mycanal-hodor-core", editable = true }

@@ -7,11 +7,12 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from log import get_logger
-from src.timing import timeit
-from src.detail import DetailData, ResumeFallback
-from src.expiration import availability_from_raw
-from src.series import SeasonCatalog, identifier, positive_number
+from mycanal_hodor_core.logging import get_logger
+from mycanal_hodor_core.timing import timeit
+from mycanal_expiry_tracker.detail import DetailData, ResumeFallback
+from mycanal_expiry_tracker.expiration import availability_from_raw
+from mycanal_hodor_core.episodes import SeasonCatalog, identifier, positive_number
+from .catalog_cache import catalog_from_cache, catalog_to_cache
 
 log = get_logger(__name__)
 CACHE_LIFETIME = timedelta(hours=24)
@@ -44,13 +45,13 @@ class DetailCache:
     def _normalize_entry(entry: object) -> dict | None:
         if isinstance(entry, dict) and entry.get('kind') == 'season':
             try:
-                catalog = SeasonCatalog.from_cache(entry.get('catalog'))
+                catalog = catalog_from_cache(entry.get('catalog'))
                 brand_id = identifier(entry.get('brand_id'))
                 if not brand_id:
                     return None
                 return {'kind': 'season', 'brand_id': brand_id,
                         'retrieved_at': entry.get('retrieved_at'),
-                        'catalog': catalog.to_cache()}
+                        'catalog': catalog_to_cache(catalog)}
             except (ValueError, TypeError):
                 return None
         if not isinstance(entry, dict) or 'availability_end_date' not in entry:
@@ -140,7 +141,7 @@ class DetailCache:
             age = datetime.now(timezone.utc) - datetime.fromisoformat(entry['retrieved_at'])
             if not timedelta(0) <= age < self.lifetime:
                 return None
-            catalog = SeasonCatalog.from_cache(entry['catalog'])
+            catalog = catalog_from_cache(entry['catalog'])
             return catalog if catalog.season.content_id == season_id else None
         except (ValueError, TypeError):
             return None
@@ -151,7 +152,7 @@ class DetailCache:
         self.entries[f'season:{brand_id}:{catalog.season.content_id}'] = {
             'kind': 'season', 'brand_id': brand_id,
             'retrieved_at': datetime.now(timezone.utc).isoformat(),
-            'catalog': catalog.to_cache(),
+            'catalog': catalog_to_cache(catalog),
         }
         self.dirty = True
 

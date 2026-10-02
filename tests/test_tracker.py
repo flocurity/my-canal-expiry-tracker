@@ -4,55 +4,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.cache import DetailCache
-from src.detail import DetailData
-from src.excel import build_dataframe
-from src.canal_api import DetailError
-from src.tracker import extract_subgenre, process_items
-
-
-@pytest.mark.parametrize('tracking', [
-    None, [], {}, {'dataLayer': None}, {'dataLayer': []}, {'dataLayer': {}},
-    *[{'dataLayer': {'subgenre': value}} for value in (None, 42, False, [], {}, '', ' \t')],
-])
-def test_unusable_subgenre(tracking):
-    assert extract_subgenre({'tracking': tracking}) == ''
-
-
-def test_subgenre_preserved_verbatim():
-    value = '  Science-FICTION / mystère  '
-    assert extract_subgenre({'tracking': {'dataLayer': {'subgenre': value}}}) == value
-
-
-@pytest.mark.parametrize('value', ['Série Science-fiction', '  Série Science-fiction \t'])
-@pytest.mark.parametrize('tracking', [{}, {'dataLayer': {'subgenre': 'Serie Science-fiction'}}])
-def test_detail_subgenre_wins_and_is_preserved(value, tracking):
-    assert extract_subgenre({
-        'detail': {'subgenre': value}, 'tracking': tracking,
-    }) == value
-
-
-@pytest.mark.parametrize('detail', [
-    None, [], {},
-    *[{'subgenre': value} for value in (None, 42, False, [], {}, '', ' \t\n')],
-])
-def test_unusable_detail_subgenre_falls_back(detail):
-    value = '  Serie Science-fiction  '
-    assert extract_subgenre({
-        'detail': detail, 'tracking': {'dataLayer': {'subgenre': value}},
-    }) == value
-
-
-@pytest.mark.parametrize('value', [None, 42, False, [], {}, '', ' \t\n'])
-def test_unusable_subgenre_in_both_locations(value):
-    assert extract_subgenre({
-        'detail': {'subgenre': value},
-        'tracking': {'dataLayer': {'subgenre': value}},
-    }) == ''
-
-
-def test_subgenre_missing_in_both_locations():
-    assert extract_subgenre({}) == ''
+from mycanal_expiry_tracker.cache import DetailCache
+from mycanal_expiry_tracker.detail import DetailData
+from mycanal_expiry_tracker.excel import build_dataframe
+from mycanal_expiry_tracker.canal_api import DetailError
+from mycanal_expiry_tracker.tracker import extract_subgenre, process_items
 
 
 def test_continues_after_item_failure(tmp_path, item, fixture_data):
@@ -115,7 +71,7 @@ def test_missing_subgenre_in_detail(tmp_path, item, fixture_data):
 
 @pytest.mark.parametrize('supports_v5', [False, True])
 def test_query_changes_reuse_enrichment_until_refresh(tmp_path, item, fixture_data, supports_v5):
-    from src.canal_api import build_detail_url
+    from mycanal_expiry_tracker.canal_api import build_detail_url
 
     item = replace(item, supports_detail_v5=supports_v5)
     path = tmp_path / 'cache.json'
@@ -152,30 +108,30 @@ def test_v5_duration_and_availability_survive_cache(tmp_path, item, fixture_data
 @pytest.mark.parametrize('minutes, expected', [(107, 107 / 1440), (133, 133 / 1440),
                                                (60, 60 / 1440), (47, 47 / 1440)])
 def test_movie_duration(minutes, expected, fixture_data, item):
-    from src.tracker import extract_duration
+    from mycanal_expiry_tracker.tracker import extract_duration
     payload = fixture_data('detail_movie_v5.json')
     payload['detail']['duration'] = minutes
     extracted = extract_duration(payload)
     assert extracted == minutes
-    from src.tracker import ContentResult
+    from mycanal_expiry_tracker.tracker import ContentResult
     result = ContentResult(item, None, 'Date inconnue', duration_minutes=extracted)
     assert build_dataframe([result])['Durée'].iloc[0] == expected
 
 
 @pytest.mark.parametrize('value', [None, True, 0, -1, '107', 107.5, [], {}, float('inf')])
 def test_unusable_duration(value):
-    from src.tracker import extract_duration
+    from mycanal_expiry_tracker.tracker import extract_duration
     assert extract_duration({'detail': {'genre': 'Cinéma', 'duration': value}}) is None
 
 
 @pytest.mark.parametrize('name', ['detail_movie.json', 'detail_show.json', 'detail_season.json'])
 def test_missing_duration(name, fixture_data):
-    from src.tracker import extract_duration
+    from mycanal_expiry_tracker.tracker import extract_duration
     assert extract_duration(fixture_data(name)) is None
 
 
 def test_series_duration_never_used():
-    from src.tracker import extract_duration
+    from mycanal_expiry_tracker.tracker import extract_duration
     assert extract_duration({'detail': {'genre': 'Séries', 'duration': 107}}) is None
 
 
@@ -231,7 +187,7 @@ def test_vicious_token_change_reuses_fresh_enrichment(tmp_path, item, fixture_da
 @pytest.mark.parametrize('reason', ['missing', 'expired', 'refresh'])
 def test_fetch_uses_current_url(tmp_path, item, fixture_data, reason):
     from datetime import datetime, timedelta, timezone
-    from src.canal_api import build_detail_url
+    from mycanal_expiry_tracker.canal_api import build_detail_url
     path = tmp_path / 'details.json'
     cache = DetailCache(path)
     if reason != 'missing':

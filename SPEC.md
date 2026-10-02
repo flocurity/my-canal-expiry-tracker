@@ -56,26 +56,31 @@ success. Normal tests use synthetic requests and mocked HTTP only. The endpoint,
 cursor layout and five-page limit follow user-observed API behavior; there is no
 live API validation in the offline tests.
 
-## Desired structure
+## Project structure and ownership
 
-Create a simple structure such as:
+Three independent projects, with no enclosing uv workspace:
 
-    canal-expiry/
-    ├── input/
-    │   ├── playlist-page-1.json
-    │   └── playlist-page-2.json
-    ├── output/
-    │   └── ma-liste-canal.xlsx
-    ├── src/
-    │   ├── playlist.py
-    │   ├── canal_api.py
-    │   └── excel.py
-    ├── main.py
-    ├── pyproject.toml
-    ├── uv.lock
-    └── README.md
+- Public `mycanal-hodor-core`, namespace `mycanal_hodor_core`: conservative Hodor
+  transport, URL security, technical errors, JSON decoding, detailV5 transformation,
+  raw availability/detail extraction, canonical season/episode models and navigation.
+- Public Expiry, namespace `mycanal_expiry_tracker`: acquisition, playlist/personal
+  resume state, completion/backlog/groups, cache serialization and TTL, report
+  statuses, Paris/French presentation, Excel and CLI.
+- Private Catalog, namespace `mycanal_catalog`: editorial sources/navigation,
+  collection traversal/pagination, deduplication, memberships, SQLite and crawl state.
 
-No need to over-engineer this. It is a small personal tool.
+Only the applications depend on Core; Core imports neither application and the
+applications never import each other. Shared parsers have one implementation in
+Core. Expiry's `canal_api.py` facade retains stricter playlist URL policy and maps
+Core technical failures to the existing French report statuses. Season cache
+serialization remains in Expiry; the existing JSON format and TTL are unchanged.
+
+Each project has its own metadata, environment, lockfile and offline tests. Local
+uv source overrides select the unpublished sibling Core during development; wheel
+metadata contains only a versioned Core requirement. No runtime data is packaged.
+The compatibility root `main.py` retains checkout-relative data paths. The installed
+CLI uses the current working directory or explicit `--data-dir` for input/cache/output,
+never the installed package directory.
 
 ## Playlist JSON format
 
@@ -546,19 +551,15 @@ Pay attention to Excel row/column references so that the rules remain correct ac
 
 ## Logging
 
-The provided `log.py` comes from another personal project.
-
-Reuse it as the project's logging implementation.
-
-The code under:
-
-    if __name__ == "__main__":
-
-is demo/test code from the original project and must not be included.
-
-The `hint()` method is specific to the original project and may be removed if unused.
-
-Add `structlog` as a runtime dependency.
+Shared logger access, synchronous inclusive `timeit()` and reusable console rendering
+live in Core. Importing any Core module must not configure global logging.
+Application entry points explicitly choose their configuration; `main()` can also
+be embedded with caller-selected processors. Timing preserves function metadata,
+return values and original exceptions; logging failure cannot break the operation.
+Application-specific timing placement and logging policy remain in Expiry/Catalog.
+Root `log.py` is a compatibility import facade with no duplicated implementation.
+The console renderer's project-provided provenance is recorded in Core's NOTICE;
+applicable MIT notices are preserved.
 
 Logging conventions and usage rules are defined in `AGENTS.md`.
 

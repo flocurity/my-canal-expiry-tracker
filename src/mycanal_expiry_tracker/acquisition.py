@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo
 
 import prompt_toolkit
 
-from log import get_logger
-from src.canal_api import CanalClient, DetailError, validate_api_url
+from mycanal_hodor_core.logging import get_logger
+from mycanal_expiry_tracker.canal_api import CanalClient, DetailError, validate_api_url
 
 log = get_logger(__name__)
 

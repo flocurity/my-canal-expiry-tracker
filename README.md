@@ -150,9 +150,10 @@ uv run python main.py --refresh
 ```
 
 `--refresh` ignores existing entries and updates the cache after successful
-retrievals. Configure the default delay in `src/canal_api.py` and cache lifetime
-in `src/cache.py`. All paths are relative to the project, even when invoked from
-another working directory.
+retrievals. The shared transport default lives in Core; cache lifetime lives in
+`src/mycanal_expiry_tracker/cache.py`. `uv run python main.py` retains checkout-relative
+data paths. The installed `mycanal-expiry-tracker` command uses the current working
+directory, or `--data-dir DIRECTORY`, for `input`, `cache` and `output`.
 
 ## Excel output
 
@@ -292,3 +293,22 @@ uv run python tools/test_rate_limit.py --url "PUBLIC_DETAIL_URL" --count 3 --del
 It defaults to three requests, caps the count at 20, requires at least one second
 between requests, performs no retries, and stops immediately on HTTP 429 or another
 HTTP error. It is never invoked by the test suite or normal application.
+
+## Independent projects
+
+Expiry depends on the public `mycanal-hodor-core` package for HTTP, API parsing,
+canonical episode models, structured logging and timing. Personal playlist/resume
+state, JSON cache policy and Excel reporting remain here. The private Catalog
+application also uses Core; neither application depends on the other.
+
+Packages use the `mycanal_expiry_tracker` and `mycanal_hodor_core` namespaces.
+During unpublished development, `uv sync` uses the sibling Core checkout through
+a local uv source override; each project keeps its own environment and lockfile.
+Distribution metadata declares `mycanal-hodor-core>=0.1,<0.2`, without a local path.
+To test built wheels before publication, supply the Core wheel alongside Expiry.
+No authenticated inputs, cache or generated output are packaged.
+
+Logging is configured explicitly by CLI startup. Importing Core does not configure
+global logging; applications may select other structlog processors. The shared
+`timeit()` remains synchronous and inclusive, preserving exceptions even when
+logging fails. Existing timing placements remain in Expiry.

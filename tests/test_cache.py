@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.cache import DetailCache
-from src.detail import DetailData
+from mycanal_expiry_tracker.cache import DetailCache
+from mycanal_expiry_tracker.detail import DetailData
 
 
 def test_cache_roundtrip_including_unknown(tmp_path, item):
@@ -47,7 +47,7 @@ def test_malformed_entry(tmp_path):
 def test_write_failure_is_recoverable(tmp_path, monkeypatch):
     cache = DetailCache(tmp_path / 'details.json')
     cache.put('id', DetailData())
-    monkeypatch.setattr('src.cache.os.replace', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
+    monkeypatch.setattr('mycanal_expiry_tracker.cache.os.replace', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
     cache.save()
     assert not list(tmp_path.iterdir())
 

@@ -7,11 +7,11 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from src.cache import DetailCache
-from src.canal_api import DetailError
-from src.playlist import load_playlist
-from src.series import parse_duration_label
-from src.tracker import process_items
+from mycanal_expiry_tracker.cache import DetailCache
+from mycanal_expiry_tracker.canal_api import DetailError
+from mycanal_expiry_tracker.playlist import load_playlist
+from mycanal_expiry_tracker.series import parse_duration_label
+from mycanal_expiry_tracker.tracker import process_items
 
 
 @pytest.fixture
@@ -52,12 +52,6 @@ def episodes_url(number):
             + f'/squirtle_brand?seasonID=squirtle_s{number}')
 
 
-@pytest.mark.parametrize('label, expected', [
-    ('57 min', 57), ('1h02', 62), ('1h31', 91), (' 1 h 02 min ', 62),
-    (None, None), ('unknown', None), ('1h99', None), (True, None), ('0 min', None),
-])
-def test_duration_labels(label, expected):
-    assert parse_duration_label(label) == expected
 
 
 def test_playlist_wins_inclusive_resume_and_expiration(tmp_path, series, client):
@@ -370,7 +364,7 @@ def test_expiration_partition_rows_cache_and_excel(
     from xml.etree import ElementTree as ET
     from zipfile import ZipFile
 
-    from src.excel import COLUMNS, DAYS_FORMULA, write_excel
+    from mycanal_expiry_tracker.excel import COLUMNS, DAYS_FORMULA, write_excel
 
     template = fixture_data('episodes_series.json')
     catalogs = {n: season_response(template, n, ['21 min'] * 4, [3, 4, 5, 7])
@@ -512,7 +506,7 @@ def test_completed_final_episode_keeps_row_or_later_backlog(
     from xml.etree import ElementTree as ET
     from zipfile import ZipFile
 
-    from src.excel import write_excel
+    from mycanal_expiry_tracker.excel import write_excel
 
     series = replace(series, episode_id='squirtle_s3e4', is_completed=True)
     template = fixture_data('episodes_series.json')
@@ -555,23 +549,3 @@ def test_movie_completion_does_not_change_report(tmp_path, item, client, fixture
     completed_item = replace(item, is_completed=True)
     completed = process_items([completed_item], client, cache)
     assert completed == [replace(original, item=completed_item)]
-
-
-@pytest.mark.parametrize('name', ['detail_show.json', 'detail_season.json'])
-def test_current_detail_navigation_structure(name, fixture_data):
-    from src.expiration import extract_raw_availability
-    from src.series import _navigation
-    from src.tracker import extract_subgenre
-
-    payload = fixture_data(name)
-    assert 'informations' not in payload['detail']
-    assert extract_raw_availability(payload) == (None, '')
-    assert extract_subgenre(payload) == 'Série Science-fiction'
-    url, episode_id, season_number, episode_number = _navigation(payload)
-    assert episode_id == 'fiction_episode_50002'
-    assert (season_number, episode_number) == (1, 1)
-    assert parse_qs(urlsplit(url).query)['seasonID'] == ['fiction_season_50002']
-    assert payload['actionLayout']['primaryActions'][0]['onClick']['episodesList']['URLPage'] == url
-    # A known playlist point can also obtain navigation through the current tab.
-    payload['actionLayout']['primaryActions'] = []
-    assert _navigation(payload) == (url, '', None, None)

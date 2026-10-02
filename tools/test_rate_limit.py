@@ -1,18 +1,14 @@
 """Manually observe a few public detail responses; stop immediately on HTTP 429."""
 
 import argparse
-import sys
 import time
-from pathlib import Path
 
 import requests
 
-# Allow the documented invocation from the repository without installing a package.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from log import get_logger
-from main import nonnegative_delay
-from src.canal_api import TIMEOUT_SECONDS, USER_AGENT, DetailError, validate_detail_url
+from mycanal_hodor_core.logging import get_logger
+from mycanal_hodor_core.console import configure_console
+from mycanal_expiry_tracker.cli import nonnegative_delay
+from mycanal_expiry_tracker.canal_api import TIMEOUT_SECONDS, USER_AGENT, DetailError, validate_detail_url
 
 log = get_logger(__name__)
 HEADERS = ('Retry-After', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset',
@@ -34,6 +30,7 @@ def observation_delay(value: str) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_console()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', required=True)
     parser.add_argument('--count', type=request_count, default=3)

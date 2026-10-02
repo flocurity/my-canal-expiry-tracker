@@ -318,8 +318,9 @@ wheels = [
 [[package]]
 name = "my-canal-expiry-tracker"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
+    { name = "mycanal-hodor-core" },
     { name = "pandas" },
     { name = "prompt-toolkit" },
     { name = "requests" },
@@ -335,6 +336,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mycanal-hodor-core", editable = "../mycanal-hodor-core" },
     { name = "pandas", specifier = ">=3.0.6" },
     { name = "prompt-toolkit", specifier = ">=3.0.53" },
     { name = "requests", specifier = ">=2.34.2" },
@@ -347,6 +349,24 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
+
+[[package]]
+name = "mycanal-hodor-core"
+version = "0.1.0"
+source = { editable = "../mycanal-hodor-core" }
+dependencies = [
+    { name = "requests" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "requests", specifier = ">=2.34.2" },
+    { name = "structlog", specifier = ">=26.1.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "numpy"
