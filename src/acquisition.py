@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import prompt_toolkit
@@ -28,6 +28,7 @@ class RequestContext:
     hodor_token: str
     token_pass: str
     profile_id: str
+    query_parameters: tuple[tuple[str, str], ...] = ()
 
 
 def parse_curl(command: str) -> RequestContext:
@@ -79,18 +80,21 @@ def parse_curl(command: str) -> RequestContext:
         else:
             raise AcquisitionError('Unrecognized Copy-as-cURL option or shell syntax')
     try:
-        validate_api_url(url or '', 'page')
-        match = re.fullmatch(r'/api/v2/mycanal/page/([a-fA-F0-9]{32})/103412\.json',
+        validate_api_url(url or '', 'me')
+        match = re.fullmatch(r'/api/v2/mycanal/me/([a-fA-F0-9]{32})/lists/playlist',
                              urlsplit(url).path)
     except (DetailError, ValueError):
         match = None
     if match is None:
-        raise AcquisitionError('Expected the Mes Vidéos Hodor page URL and a valid path token')
+        raise AcquisitionError('Expected the Mes Vidéos Hodor playlist URL and a valid path token')
     if 'tokenpass' not in headers:
         raise AcquisitionError('Missing tokenPass header')
     if 'xx-profile-id' not in headers:
         raise AcquisitionError('Missing xx-profile-id header')
-    return RequestContext(match[1], headers['tokenpass'], headers['xx-profile-id'])
+    query = tuple(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    if any(key.casefold() in ('tokenpass', 'xx-profile-id') for key, _ in query):
+        raise AcquisitionError('Authentication context must use headers')
+    return RequestContext(match[1], headers['tokenpass'], headers['xx-profile-id'], query)
 
 
 def read_curl() -> str:
@@ -139,11 +143,13 @@ def acquire_pages(context: RequestContext, client: CanalClient) -> list[bytes]:
     cursor = None
     total = 0
     for page_number in range(1, 6):
-        query = {'maxContentRemaining': 500, 'get': 100, 'featureToggles': 'detailLight'}
+        query = [(key, value) for key, value in context.query_parameters
+                 if key.casefold() not in ('get', 'maxcontentremaining', 'after')]
+        query.extend([('get', '100'), ('maxContentRemaining', '500')])
         if cursor is not None:
-            query['after'] = cursor
-        url = (f'https://hodor.canalplus.pro/api/v2/mycanal/page/'
-               f'{context.hodor_token}/103412.json?{urlencode(query)}')
+            query.append(('after', cursor))
+        url = (f'https://hodor.canalplus.pro/api/v2/mycanal/me/'
+               f'{context.hodor_token}/lists/playlist?{urlencode(query)}')
         raw = client.fetch_playlist_page(url, {
             'tokenPass': context.token_pass, 'xx-profile-id': context.profile_id,
         })

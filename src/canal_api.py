@@ -2,6 +2,7 @@
 
 import math
 import random
+import re
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -34,8 +35,12 @@ def validate_api_url(url: str, resource: str) -> None:
             and parsed.port in (None, 443)
             and not parsed.username and not parsed.password
             and parsed.path.startswith(f'/api/v2/mycanal/{resource}/')
+            and (resource != 'me' or re.fullmatch(
+                r'/api/v2/mycanal/me/[a-fA-F0-9]{32}/lists/playlist', parsed.path
+            ) is not None)
             and not any(part in ('.', '..') for part in unquote(parsed.path).split('/'))
-            and not any(key.casefold() == 'tokenpass' for key, _ in parse_qsl(parsed.query))
+            and not any(key.casefold() in ('tokenpass', 'xx-profile-id')
+                        for key, _ in parse_qsl(parsed.query, keep_blank_values=True))
             and not parsed.fragment
             and not any(char.isspace() or char == '\\' for char in url)
         )
@@ -124,7 +129,7 @@ class CanalClient:
 
     def fetch_playlist_page(self, url: str, headers: dict[str, str]) -> bytes:
         """Return the decompressed response bytes without reserializing JSON."""
-        response = self._request(url, '', 'page', headers)
+        response = self._request(url, '', 'me', headers)
         try:
             return response.content
         finally:

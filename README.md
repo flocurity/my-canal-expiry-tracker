@@ -37,9 +37,9 @@ without detail URLs are skipped with a warning.
 The tracker does not log into myCANAL itself. You can acquire the playlist using
 your existing browser session:
 
-1. Log into myCANAL normally and open **Mes Vidéos**.
+1. Log into myCANAL normally and stay on the [main page](https://www.canalplus.com/)
 2. In Firefox DevTools → **Network**, find the authenticated Hodor playlist request
-   (the page endpoint ending in `103412.json`).
+   (the endpoint `/api/v2/mycanal/me/<token>/lists/playlist`). Reload if necessary.
 3. Choose **Copy as cURL**.
 4. Run `uv run python main.py --getinfo`.
 5. Paste the complete request into the multiline prompt, then press **Esc**, then **Enter**.
@@ -51,7 +51,8 @@ headers, and never saves or logs the request or those headers. API-returned
 tokenized URLs remain in the raw export; keep these private files out of Git.
 
 Acquisition uses existing pacing/retries and follows server cursors for at most
-five pages / 500 entries. It saves each original decompressed JSON body unchanged
+five pages / 500 entries. Browser query parameters are preserved, with `get=100`,
+`maxContentRemaining=500` and server-issued `after` cursors controlled by acquisition. It saves each original decompressed JSON body unchanged
 as `input/YYYY-MM-DD.HH-MM.json`, then `.page2.json`, etc., using one Paris
 timestamp. It does not generate a workbook; run `uv run python main.py` afterward.
 
@@ -64,13 +65,12 @@ echoing authentication data are refused rather than redacted.
 
 Manual DevTools response export remains supported:
 
-1. Sign in to myCANAL in your browser and open the **Mes Vidéos** page containing
-   your playlist.
+1. Sign in to myCANAL in your browser and stay on the [main page](https://www.canalplus.com/)
 2. Open the browser DevTools (`F12` or `Ctrl+Shift+I` / `Cmd+Option+I`).
 3. Open the **Network** tab.
-4. Reload the **Mes Vidéos** page if necessary to capture its network requests.
+4. Reload the main page if necessary to capture its network requests.
 5. Filter the requests for `hodor` and locate the request returning the playlist
-   contents as JSON (usually named `<digits>.json`). JSON should contain
+   contents as JSON (usually named `/playlist`). JSON should contain
     ``` json
 	"currentPage": {
 		"displayName": "Ma Playlist",

@@ -555,3 +555,23 @@ def test_movie_completion_does_not_change_report(tmp_path, item, client, fixture
     completed_item = replace(item, is_completed=True)
     completed = process_items([completed_item], client, cache)
     assert completed == [replace(original, item=completed_item)]
+
+
+@pytest.mark.parametrize('name', ['detail_show.json', 'detail_season.json'])
+def test_current_detail_navigation_structure(name, fixture_data):
+    from src.expiration import extract_raw_availability
+    from src.series import _navigation
+    from src.tracker import extract_subgenre
+
+    payload = fixture_data(name)
+    assert 'informations' not in payload['detail']
+    assert extract_raw_availability(payload) == (None, '')
+    assert extract_subgenre(payload) == 'Série Science-fiction'
+    url, episode_id, season_number, episode_number = _navigation(payload)
+    assert episode_id == 'fiction_episode_50002'
+    assert (season_number, episode_number) == (1, 1)
+    assert parse_qs(urlsplit(url).query)['seasonID'] == ['fiction_season_50002']
+    assert payload['actionLayout']['primaryActions'][0]['onClick']['episodesList']['URLPage'] == url
+    # A known playlist point can also obtain navigation through the current tab.
+    payload['actionLayout']['primaryActions'] = []
+    assert _navigation(payload) == (url, '', None, None)

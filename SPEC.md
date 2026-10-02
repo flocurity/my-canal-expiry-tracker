@@ -15,7 +15,7 @@ Use a native `prompt_toolkit.prompt(..., multiline=True)` for Firefox Copy-as-cU
 from Mes Vidéos. Submit with Esc, then Enter; pass the returned text unchanged to
 the existing parser.
 Parse it with shell-style tokenization only; never execute shell code or curl.
-Accept a GET HTTPS Hodor `/api/v2/mycanal/page/<token>/103412.json` request,
+Accept a GET HTTPS Hodor `/api/v2/mycanal/me/<token>/lists/playlist` request,
 currently validating the observed 32 hexadecimal character token shape. Require
 nonempty case-insensitive `tokenPass` and `xx-profile-id` headers. Reject
 ambiguous URLs/required headers, unsupported options or request contexts before
@@ -27,8 +27,12 @@ headers/values rather than modifying them.
 
 Use the existing Hodor client transport, Firefox User-Agent, gzip/deflate,
 timeouts, pacing and retries, with request-scoped authentication headers and no
-redirects. Request page 103412 with `maxContentRemaining=500`, `get=100`,
-`featureToggles=detailLight`. First request has no `after`; subsequent requests
+redirects. Request the playlist endpoint with `maxContentRemaining=500`, `get=100`.
+Preserve the copied browser query parameters (including any explicit feature
+toggles, display and discovery settings); replace all copied `get`,
+`maxContentRemaining` and `after` parameters. Do not inject feature toggles.
+Authentication context must be in headers, never query parameters.
+First request has no `after`; subsequent requests
 use exactly the preceding top-level `paging.idEnd`. Require a top-level
 `contents` array and boolean `paging.hasNextPage`. Stop on false; reject
 missing/invalid/repeated cursors, malformed responses, more than 100 entries per
@@ -48,7 +52,7 @@ No detail/season cache or report is touched by acquisition.
 
 Log page numbers/counts and safe failure categories, never sensitive request
 data or response contents. The command exits with code 1 on failure and 0 on
-success. Normal tests use synthetic requests and mocked HTTP only. The page ID,
+success. Normal tests use synthetic requests and mocked HTTP only. The endpoint,
 cursor layout and five-page limit follow user-observed API behavior; there is no
 live API validation in the offline tests.
 

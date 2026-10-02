@@ -104,7 +104,10 @@ def test_raw_cache_does_not_fetch_for_missing_subgenre(tmp_path, item):
 
 def test_missing_subgenre_in_detail(tmp_path, item, fixture_data):
     client = Mock()
-    client.fetch.return_value = fixture_data('detail_show.json')
+    payload = fixture_data('detail_show.json')
+    payload['detail'].pop('subgenre')
+    payload['tracking']['dataLayer'].pop('subgenre')
+    client.fetch.return_value = payload
     result = process_items([item], client, DetailCache(tmp_path / 'cache.json'))[0]
     assert result.subgenre == ''
     assert result.status == 'Date inconnue'

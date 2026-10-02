@@ -1,5 +1,8 @@
 {
-  "currentPage": {"displayTemplate": "list"},
+  "currentPage": {
+    "displayTemplate": "contentGrid",
+    "perso": "playlist"
+  },
   "contents": [
     {
       "type": "VoD",
@@ -13,7 +16,25 @@
         "displayTemplate": "detailPage",
         "displayName": "The Last Compiler",
         "path": "/cinema/the-last-compiler/h/fiction_50001",
-        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/fiction/okapi/fiction_50001.json?detailType=detailPage&objectType=unit"
+        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/okapi/fiction_50001.json?detailType=detailPage&objectType=unit&displayLogo=true",
+        "parameters": [
+          {
+            "id": "xx-epg-id",
+            "in": "headers"
+          },
+          {
+            "in": "parameters",
+            "id": "featureToggles",
+            "enum": [
+              "detailV5",
+              "detailV5Sport",
+              "mgm",
+              "registerProspect",
+              "recordBrand",
+              "downloadBrand"
+            ]
+          }
+        ]
       }
     },
     {
@@ -24,11 +45,54 @@
       "onClick": {
         "displayTemplate": "detailSeason",
         "parameters": [
-          {"in": "parameters", "id": "featureToggles", "enum": ["detailV5", "detailV5Sport", "registerProspect"]}
+          {
+            "id": "xx-epg-id",
+            "in": "headers"
+          },
+          {
+            "in": "parameters",
+            "id": "featureToggles",
+            "enum": [
+              "detailV5",
+              "detailV5Sport",
+              "mgm",
+              "registerProspect",
+              "recordBrand",
+              "downloadBrand"
+            ]
+          }
         ],
         "path": "/series/the-debugger/h/fiction_50002",
-        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/fiction/okapi/fiction_season_50002.json?detailType=detailSeason&objectType=season&brandID=fiction_50002"
-      }
+        "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/detail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/okapi/fiction_season_50002.json?detailType=detailSeason&objectType=season&brandID=fiction_50002&displayLogo=true"
+      },
+      "episodeID": "fiction_episode_50002",
+      "seasonID": "fiction_season_50002",
+      "isCompleted": false,
+      "userProgress": 64,
+      "isInOffer": true
     }
-  ]
+  ],
+  "paging": {
+    "iterationType": "id",
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "nbContents": 2,
+    "idStart": "synthetic-start",
+    "idEnd": "synthetic-end",
+    "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/me/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/lists/playlist",
+    "parameters": [
+      {
+        "id": "xx-epg-id",
+        "in": "headers"
+      },
+      {
+        "id": "xx-operator",
+        "in": "headers"
+      },
+      {
+        "id": "xx-service",
+        "in": "headers"
+      }
+    ]
+  }
 }

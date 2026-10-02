@@ -8,6 +8,7 @@ from src.playlist import PlaylistError, load_playlist
 
 def test_load_merge_deduplicate_optional_fields(tmp_path, fixture_data):
     data = fixture_data('playlist.json')
+    data['contents'][1].pop('isInOffer')
     first = tmp_path / 'a.json'
     first.write_text(json.dumps(data), encoding='utf-8')
     (tmp_path / 'b.json').write_text(json.dumps(data), encoding='utf-8')
@@ -70,9 +71,13 @@ def test_detail_v5_declaration_preserves_source_url(tmp_path, fixture_data):
     data = fixture_data('playlist.json')
     (tmp_path / 'page.json').write_text(json.dumps(data))
     movie, season = load_playlist(tmp_path)
-    assert movie.supports_detail_v5 is False
+    assert movie.supports_detail_v5 is True
     assert season.supports_detail_v5 is True
     assert season.detail_url == data['contents'][1]['onClick']['URLPage']
+    assert season.season_id == 'fiction_season_50002'
+    assert season.episode_id == 'fiction_episode_50002'
+    assert season.is_completed is False
+    assert season.user_progress == 64
 
 
 @pytest.mark.parametrize('parameters', [

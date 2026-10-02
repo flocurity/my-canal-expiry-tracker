@@ -2,7 +2,8 @@
   "detail": {
     "contentID": "squirtle_brand",
     "title": "Squirtle",
-    "subgenre": "Série Animation"
+    "subgenre": "Série Animation",
+    "genre": "Séries"
   },
   "actionLayout": {
     "primaryActions": [
@@ -10,7 +11,22 @@
         "type": "play",
         "onClick": {
           "contentID": "squirtle_s3e1",
-          "URLEpisodesList": "https://hodor.canalplus.pro/api/v2/mycanal/episodes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/squirtle_brand?seasonID=squirtle_s3"
+          "URLEpisodesList": "https://hodor.canalplus.pro/api/v2/mycanal/episodes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/squirtle_brand?seasonID=squirtle_s3",
+          "displayTemplate": "player",
+          "episodesList": {
+            "displayTemplate": "episodesList",
+            "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/episodes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/squirtle_brand?seasonID=squirtle_s3",
+            "parameters": [
+              {
+                "in": "parameters",
+                "id": "featureToggles",
+                "enum": [
+                  "tvodFunnelV5",
+                  "registerProspect"
+                ]
+              }
+            ]
+          }
         },
         "tracking": {
           "dataLayer": {
@@ -20,5 +36,21 @@
         }
       }
     ]
-  }
+  },
+  "tabs": [
+    {
+      "displayTemplate": "episodesList",
+      "URLPage": "https://hodor.canalplus.pro/api/v2/mycanal/episodes/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/squirtle_brand?seasonID=squirtle_s3",
+      "parameters": [
+        {
+          "in": "parameters",
+          "id": "featureToggles",
+          "enum": [
+            "tvodFunnelV5",
+            "registerProspect"
+          ]
+        }
+      ]
+    }
+  ]
 }

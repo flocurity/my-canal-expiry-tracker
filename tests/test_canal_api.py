@@ -239,6 +239,9 @@ def test_episodes_reuses_http_retry_and_does_not_add_detail_toggle(client, fixtu
     'https://hodor.canalplus.pro/api/v2/mycanal/episodes/../me/context',
     'https://hodor.canalplus.pro/api/v2/mycanal/episodes/%2e%2e/me/context',
     'https://hodor.canalplus.pro/api/v2/mycanal/episodes/context?tokenPass=fake',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/context?xx-profile-id=fake',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/context?XX-PROFILE-ID=fake',
+    'https://hodor.canalplus.pro/api/v2/mycanal/episodes/context?xx-profile-id=',
 ])
 def test_episodes_rejects_private_or_unsafe_endpoints(client, url):
     api, session, sleep = client

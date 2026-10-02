@@ -17,7 +17,7 @@ from src.playlist import load_playlist
 TOKEN = 'a' * 32
 AUTH = 'FAKE_AUTH_NOT_VALID'
 PROFILE = 'FAKE_PROFILE_NOT_VALID'
-URL = f'https://hodor.canalplus.pro/api/v2/mycanal/page/{TOKEN}/103412.json'
+URL = f'https://hodor.canalplus.pro/api/v2/mycanal/me/{TOKEN}/lists/playlist'
 CURL = f"curl '{URL}' -H 'tokenPass: {AUTH}' -H 'xx-profile-id: {PROFILE}' --compressed"
 
 
@@ -56,9 +56,9 @@ def test_parser_header_case_order_multiline_and_ignored_headers():
     (f"curl '{URL}' -H 'xx-profile-id: {PROFILE}'", 'Missing tokenPass'),
     (f"curl '{URL}' -H 'tokenPass: {AUTH}'", 'Missing xx-profile-id'),
     (CURL.replace(TOKEN, 'short'), 'path token'),
-    (CURL.replace('hodor.canalplus.pro', 'evil.invalid'), 'page URL'),
-    (CURL.replace('103412.json', '999.json'), 'page URL'),
-    (CURL.replace('/page/', '/me/'), 'page URL'),
+    (CURL.replace('hodor.canalplus.pro', 'evil.invalid'), 'playlist URL'),
+    (CURL.replace('/lists/playlist', '/lists/other'), 'playlist URL'),
+    (CURL.replace('/me/', '/page/'), 'playlist URL'),
     (CURL + " -X POST", 'GET'),
     (CURL + " -H 'tokenPass: duplicate'", 'duplicate'),
     ("curl 'unterminated", 'quoting'),
@@ -122,8 +122,8 @@ def test_complete_acquisition_raw_files_and_loader(cli, page_count):
     assert api.fetch_playlist_page.call_count == page_count
     for n, call in enumerate(api.fetch_playlist_page.call_args_list):
         query = parse_qs(urlsplit(call.args[0]).query)
+        assert urlsplit(call.args[0]).path == f'/api/v2/mycanal/me/{TOKEN}/lists/playlist'
         assert query == dict(maxContentRemaining=['500'], get=['100'],
-                             featureToggles=['detailLight'],
                              **({'after': [f'opaque+/={n}']} if n else {}))
         assert call.args[1] == {'tokenPass': AUTH, 'xx-profile-id': PROFILE}
     active = sorted(directory.glob('*.json'))
@@ -231,3 +231,38 @@ def test_shared_transport_retries_without_sensitive_logging(monkeypatch):
             api.fetch_playlist_page(URL, {'tokenPass': AUTH, 'xx-profile-id': PROFILE})
         assert str(error.value) == 'RequestException'
         assert error.value.__suppress_context__
+
+
+def test_browser_query_context_survives_pagination():
+    from urllib.parse import parse_qsl, urlencode
+
+    browser = [('dsp', 'contentGrid'), ('imageRatio', '169'), ('imageSize', 'medium'),
+               ('titleDisplayMode', 'subtitle'), ('displayLogo', 'true'),
+               ('discoverMode', 'false'), ('distmodes', 'svod,tvod'),
+               ('featureToggles', 'detailLight'), ('extra', ''), ('extra', 'two'),
+               ('get', '20'), ('get', '200'), ('maxContentRemaining', '5'),
+               ('after', 'copied-cursor')]
+    command = CURL.replace(URL, URL + '?' + urlencode(browser))
+    context = parse_curl(command)
+    assert context.query_parameters == tuple(browser)
+    client = Mock()
+    client.fetch_playlist_page.side_effect = [raw_page(True, 'opaque+/=server'), raw_page()]
+    assert acquire_pages(context, client) == [raw_page(True, 'opaque+/=server'), raw_page()]
+    preserved = browser[:-4]
+    for index, call in enumerate(client.fetch_playlist_page.call_args_list):
+        query = parse_qsl(urlsplit(call.args[0]).query, keep_blank_values=True)
+        assert query == preserved + [('get', '100'), ('maxContentRemaining', '500')] + (
+            [('after', 'opaque+/=server')] if index else []
+        )
+
+
+@pytest.mark.parametrize('path', [f'/api/v2/mycanal/page/{TOKEN}/103412.json',
+                                  f'/api/v2/mycanal/me/{TOKEN}/profile'])
+def test_playlist_transport_rejects_other_resources(monkeypatch, path):
+    with CanalClient() as client:
+        get = Mock()
+        monkeypatch.setattr(client.session, 'get', get)
+        with pytest.raises(DetailError):
+            client.fetch_playlist_page('https://hodor.canalplus.pro' + path,
+                                       {'tokenPass': AUTH, 'xx-profile-id': PROFILE})
+        get.assert_not_called()

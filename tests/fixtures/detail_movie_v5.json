@@ -5,6 +5,13 @@
     "genre": "Cinéma",
     "subgenre": "Film Horreur",
     "duration": 98,
-    "availabilityEndDate": 1823119140000
+    "availabilityEndDate": 1823119140000,
+    "contentID": "fiction_50001"
+  },
+  "tracking": {
+    "dataLayer": {
+      "genre": "Cinéma",
+      "subgenre": "Film Horreur"
+    }
   }
 }

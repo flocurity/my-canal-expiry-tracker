@@ -1,14 +1,38 @@
 # Fixture provenance
 
-`playlist.json` is a reduced, fictionalized version of the actual `input/page1.json`
-and `input/page2.json` item structures. In particular, a season can use a different
-endpoint content ID from the playlist's brand content ID.
+On 2026-10-02, four temporary real captures from the new playlist flow were
+inspected before updating the fixtures: playlist, detailPage, detailShow and
+detailSeason. They are structural references only, never runtime test inputs.
 
-Public endpoint inspection on 2026-09-28 returned HTTP 200 for `detailShow` and
-`detailSeason`. Both contained `detail.informations` without `contentAvailability`.
-`detail_show.json` and `detail_season.json` preserve the relevant observed nesting,
-with fictional IDs/titles and unrelated metadata omitted. Neither fixture asserts
-an expiration for an episode or an entire series.
+`playlist.json` now models the observed top-level `currentPage` (contentGrid /
+playlist), `contents` and cursor `paging`, including its API-provided
+`/me/<token>/lists/playlist` URL. Both movie and folder onClick descriptors
+advertise detailV5. Movie duration remains integer milliseconds; folders can
+provide string season/episode IDs, boolean completion and integer progress.
+The folder's brand ID can differ from its detailSeason endpoint ID. This reduced
+two-item synthetic export is deliberately complete; the captured page had 100
+items. Counts, cursors, resume state, identities and tokens here are synthetic.
+Missing optional fields are constructed explicitly in tests.
+
+`detail_show.json` and `detail_season.json` now use the observed flattened
+`detail` object rather than the older `detail.informations` shape. Neither current
+capture exposes a series availability timestamp, duration, `detail.seasons` or
+`parentShow.seasons`. Both expose primary-action `onClick.URLEpisodesList`,
+nested `onClick.episodesList`, action-level `tracking.dataLayer` season/episode
+numbers and an episodesList tab. Episode descriptors advertise tvodFunnelV5 and
+registerProspect, not detailV5. Resume scenarios and URL IDs are fictional;
+unrelated player/media/personal endpoints and tracking query values are omitted.
+`detail_series_v5.json` uses this same current navigation structure while keeping
+its existing synthetic regression scenario. `detail_movie_v5.json` preserves
+flat integer-minute duration and availabilityEndDate plus tracking subgenre.
+Its synthetic values are intentionally independent of the captured movie.
+
+Legacy availability fixtures below remain to cover supported historical fallbacks.
+The current captures do not prove legacy season selectors or episodes pagination;
+`episodes_series.json` remains based on the earlier episodes observations.
+Acquisition separately validates the current `/me/<token>/lists/playlist` endpoint;
+these fixtures contain no authentication header values.
+No tests read `prompts/`; deleting the temporary captures does not affect tests.
 
 `detail_documentary.json` is based on an inspected HTTP 200 `detailPage` response.
 It preserves the actual availability keys, nesting, timestamp, booleans and generic
