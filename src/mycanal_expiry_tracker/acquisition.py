@@ -3,18 +3,17 @@
 import json
 import os
 import re
-import shlex
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
-import prompt_toolkit
-
+from mycanal_hodor_core.bootstrap import (
+    BootstrapError, HodorRuntimeContext, parse_curl as parse_browser_curl, read_curl,
+)
 from mycanal_hodor_core.logging import get_logger
-from mycanal_expiry_tracker.canal_api import CanalClient, DetailError, validate_api_url
+from mycanal_expiry_tracker.canal_api import CanalClient
 
 log = get_logger(__name__)
 
@@ -23,84 +22,21 @@ class AcquisitionError(ValueError):
     """A safe, non-sensitive acquisition failure."""
 
 
-@dataclass(frozen=True, repr=False)
-class RequestContext:
-    hodor_token: str
-    token_pass: str
-    profile_id: str
-    query_parameters: tuple[tuple[str, str], ...] = ()
+# Keep the existing acquisition API; parsing and interactive input live in Core.
+RequestContext = HodorRuntimeContext
 
 
 def parse_curl(command: str) -> RequestContext:
-    """Parse a restricted GET cURL grammar as data, never as shell code."""
     try:
-        args = shlex.split(command.replace('\r\n', '\n').replace('\\\n', ''), posix=True)
-    except ValueError:
-        raise AcquisitionError('Invalid Copy-as-cURL quoting') from None
-    if not args or args.pop(0) != 'curl':
-        raise AcquisitionError('Expected a Firefox Copy-as-cURL request')
-    url = None
-    headers = {}
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg in ('--compressed', '--globoff'):
-            continue
-        option, separator, inline = arg.partition('=')
-        if option in ('-H', '--header', '-X', '--request', '--url',
-                      '-A', '--user-agent', '-b', '--cookie'):
-            if separator:
-                value = inline
-            else:
-                if index == len(args):
-                    raise AcquisitionError('Incomplete Copy-as-cURL option')
-                value = args[index]
-                index += 1
-            if option in ('-H', '--header'):
-                name, colon, value = value.partition(':')
-                if not colon:
-                    raise AcquisitionError('Invalid copied header')
-                name, value = name.strip().lower(), value.strip()
-                if name in ('tokenpass', 'xx-profile-id'):
-                    if name in headers or not value or any(
-                        ord(char) < 33 or ord(char) > 126 for char in value
-                    ):
-                        raise AcquisitionError('Invalid or duplicate required header')
-                    headers[name] = value
-            elif option in ('-X', '--request') and value != 'GET':
-                raise AcquisitionError('Expected a GET playlist request')
-            elif option == '--url':
-                if url is not None:
-                    raise AcquisitionError('Expected exactly one request URL')
-                url = value
-            continue
-        if arg.startswith('https://') and url is None:
-            url = arg
-        else:
-            raise AcquisitionError('Unrecognized Copy-as-cURL option or shell syntax')
-    try:
-        validate_api_url(url or '', 'me')
-        match = re.fullmatch(r'/api/v2/mycanal/me/([a-fA-F0-9]{32})/lists/playlist',
-                             urlsplit(url).path)
-    except (DetailError, ValueError):
-        match = None
-    if match is None:
+        context = parse_browser_curl(command)
+    except BootstrapError as exc:
+        if 'Hodor API URL' in str(exc):
+            raise AcquisitionError('Expected the Mes Vidéos Hodor playlist URL and a valid path token') from None
+        raise AcquisitionError(str(exc)) from None
+    if not re.fullmatch(r'/api/v2/mycanal/me/[a-fA-F0-9]{32}/lists/playlist',
+                        urlsplit(context.request_url).path):
         raise AcquisitionError('Expected the Mes Vidéos Hodor playlist URL and a valid path token')
-    if 'tokenpass' not in headers:
-        raise AcquisitionError('Missing tokenPass header')
-    if 'xx-profile-id' not in headers:
-        raise AcquisitionError('Missing xx-profile-id header')
-    query = tuple(parse_qsl(urlsplit(url).query, keep_blank_values=True))
-    if any(key.casefold() in ('tokenpass', 'xx-profile-id') for key, _ in query):
-        raise AcquisitionError('Authentication context must use headers')
-    return RequestContext(match[1], headers['tokenpass'], headers['xx-profile-id'], query)
-
-
-def read_curl() -> str:
-    print('Paste Firefox "Copy as cURL" from myCANAL > Mes Vidéos.')
-    print('Sensitive request: do not share or save it. Press Esc, then Enter to submit.')
-    return prompt_toolkit.prompt('> ', multiline=True)
+    return context
 
 
 def contains_authentication(value: object, context: RequestContext) -> bool:

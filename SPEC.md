@@ -13,7 +13,7 @@ application implements no login or authentication bypass.
 
 Use a native `prompt_toolkit.prompt(..., multiline=True)` for Firefox Copy-as-cURL
 from Mes Vidéos. Submit with Esc, then Enter; pass the returned text unchanged to
-the existing parser.
+the shared Core browser parser. Expiry retains the playlist-specific endpoint validation.
 Parse it with shell-style tokenization only; never execute shell code or curl.
 Accept a GET HTTPS Hodor `/api/v2/mycanal/me/<token>/lists/playlist` request,
 currently validating the observed 32 hexadecimal character token shape. Require

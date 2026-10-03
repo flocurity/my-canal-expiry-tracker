@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -361,12 +361,17 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "prompt-toolkit", marker = "extra == 'interactive'", specifier = ">=3.0.53" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "structlog", specifier = ">=26.1.0" },
 ]
+provides-extras = ["interactive"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
+dev = [
+    { name = "prompt-toolkit", specifier = ">=3.0.53" },
+    { name = "pytest", specifier = ">=9.1.1" },
+]
 
 [[package]]
 name = "numpy"

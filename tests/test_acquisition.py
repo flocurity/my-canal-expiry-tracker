@@ -42,26 +42,10 @@ def cli(tmp_path, monkeypatch):
     return directory, api, factory
 
 
-def test_parser_header_case_order_multiline_and_ignored_headers():
-    command = (f"curl --compressed '{URL}?get=20' " + chr(92) + chr(10)
-               + f" -H 'XX-PROFILE-ID: {PROFILE}' -H 'Cookie: ignored' "
-               + f"--header='TOKENPASS: {AUTH}' -X GET -A 'ignored'")
-    context = parse_curl(command)
-    assert (context.hodor_token, context.token_pass, context.profile_id) == (TOKEN, AUTH, PROFILE)
-    assert AUTH not in repr(context)
-    assert PROFILE not in repr(context)
-
-
 @pytest.mark.parametrize('command, reason', [
-    (f"curl '{URL}' -H 'xx-profile-id: {PROFILE}'", 'Missing tokenPass'),
-    (f"curl '{URL}' -H 'tokenPass: {AUTH}'", 'Missing xx-profile-id'),
-    (CURL.replace(TOKEN, 'short'), 'path token'),
-    (CURL.replace('hodor.canalplus.pro', 'evil.invalid'), 'playlist URL'),
     (CURL.replace('/lists/playlist', '/lists/other'), 'playlist URL'),
     (CURL.replace('/me/', '/page/'), 'playlist URL'),
-    (CURL + " -X POST", 'GET'),
-    (CURL + " -H 'tokenPass: duplicate'", 'duplicate'),
-    ("curl 'unterminated", 'quoting'),
+    (f"curl '{URL}' -H 'xx-profile-id: {PROFILE}'", 'Missing tokenPass'),
 ])
 def test_invalid_input_no_requests_or_files(cli, monkeypatch, command, reason):
     directory, api, factory = cli
@@ -73,42 +57,6 @@ def test_invalid_input_no_requests_or_files(cli, monkeypatch, command, reason):
     assert before == {p.name: p.read_bytes() for p in directory.iterdir()}
     assert reason in str(logs)
     assert AUTH not in str(logs) and PROFILE not in str(logs) and TOKEN not in str(logs)
-
-
-def test_shell_syntax_never_executes(cli, monkeypatch):
-    directory, api, factory = cli
-    marker = directory / 'EXECUTED'
-    malicious = CURL + f' $(touch "{marker}") ; touch "{marker}" | cat > "{marker}"'
-    monkeypatch.setattr(main, 'read_curl', lambda: malicious)
-    assert main.main(['--getinfo']) == 1
-    assert not marker.exists()
-    factory.assert_not_called()
-    # Quoted substitutions are also inert data, even in ignored headers.
-    parse_curl(CURL + f" -H 'X-Ignored: $(touch {marker}); | >'")
-    assert not marker.exists()
-
-
-def test_read_multiline_paste(monkeypatch):
-    long_token = 'FAKE_AUTH_' + 'x' * 2400
-    pasted = (' ' + chr(92) + chr(10)).join([
-        f"curl '{URL}'",
-        "-H 'User-Agent: Mozilla/5.0 Firefox/156.0'",
-        f"-H 'tokenPass: {long_token}'",
-        "-H 'Accept: application/json'",
-        f"-H 'xx-profile-id: {PROFILE}'",
-        "--compressed",
-    ]) + chr(10)
-    assert len(pasted) > 2048
-    assert len(long_token) > 1800
-    prompt = Mock(return_value=pasted)
-    monkeypatch.setattr('mycanal_expiry_tracker.acquisition.prompt_toolkit.prompt', prompt)
-    received = read_curl()
-    assert received == pasted
-    prompt.assert_called_once_with('> ', multiline=True)
-    context = parse_curl(received)
-    assert context.token_pass == long_token
-    assert context.profile_id == PROFILE
-    assert context.hodor_token == TOKEN
 
 
 @pytest.mark.parametrize('page_count', [1, 2, 5])

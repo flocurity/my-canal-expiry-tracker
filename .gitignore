@@ -224,3 +224,4 @@ output/
 .DS_Store
 .idea/
 .vscode/
+hidden_prompts
