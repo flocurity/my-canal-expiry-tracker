@@ -370,17 +370,17 @@ durations, expiration handling, Excel formulas and formatting are unchanged.
 Include the resume episode in full unless the current playlist explicitly has
 literal boolean `isCompleted: true`; then exclude only that matched episode.
 Missing, false, null or malformed values mean not completed. `userProgress`
-never determines completion or prorates duration. Include all numerically later
-episodes in that season and every episode in every later season.
+never determines completion or prorates duration. Include all subsequent units in Hodor list order
+in that season and every episode in every later season.
 Completion is current playlist state, never cached; changing it takes effect on
 fresh catalog cache hits without extra requests. Only remaining episodes contribute
 to expiration groups. If none remain after complete validation, retain one playlist
 row with blank resume/expiration fields, `Date inconnue`, zero remaining episodes
 and numeric zero duration. When completion excludes the matched episode, use the first actual remaining
-episode by season/episode number as the resume label, repeated on every group row. Ignore
+episode by season number and Hodor list position as the resume label, repeated on every group row. Ignore
 earlier seasons and episodes without fetching earlier catalogs to verify viewing
-history. Season and episode ordering uses structured numbers, not contiguous IDs,
-array order or descriptions. Duplicate/contradictory identities are rejected.
+history. Season ordering uses structured season numbers; episode progression uses the
+preserved Hodor list order, never editorial episode numbers. Duplicate/contradictory identities are rejected.
 
 The public `/episodes` endpoint returns `episodes.contents`, `episodes.paging`
 and a top-level `selector`. Selector entries expose `contentID`, `seasonNumber`
@@ -794,4 +794,6 @@ Then implement the complete V1.
 
 Once the code is written, run the tests and then run the program against the example JSON files if the environment allows it.
 
-Unnumbered episode units are recognized only when their technical number equals the validated content ID with underscores removed. Mixed and unnumbered seasons use Hodor list order for resume/backlog selection; fully numbered seasons retain numeric progression. Optional raw episode titles are cached (older entries default to null). Resume labels use the title for unnumbered units, or `Unité non numérotée` with a warning when unavailable, never a technical E-number.
+Unnumbered episode units are recognized only when their technical number equals the validated content ID with underscores removed. All seasons use preserved Hodor list order for resume/backlog selection. Distinct content IDs may share a real editorial episode number; number-only resume resolution requires exactly one match. Optional raw episode titles are cached (older entries default to null). Resume labels use the title for unnumbered units, or `Unité non numérotée` with a warning when unavailable, never a technical E-number.
+
+Expiry preserves integer season numbers >= 0, including S0, in playlist input, resume fallback and catalog cache round-trips. Missing or invalid season numbers are never coerced into zero; episode list order remains Hodor order.

@@ -174,8 +174,8 @@ def test_single_season_and_unordered_episode_number_fallback(tmp_path, series, c
     client.fetch_episodes.return_value = catalog
     result = process_items([series], client, DetailCache(tmp_path / 'details.json'))[0]
     assert result.resume_episode == 'S1E1'
-    assert result.episodes_remaining == 8
-    assert result.duration_minutes == 388
+    assert result.episodes_remaining == 1
+    assert result.duration_minutes == 50
     client.fetch_episodes.assert_called_once()
 
 
@@ -245,14 +245,15 @@ def test_failed_refresh_keeps_previous_catalog(tmp_path, series, client):
     assert DetailCache(path).get_season(series.content_id, series.season_id) == old
 
 
-def test_playlist_resume_fields_are_preserved(tmp_path, fixture_data):
+@pytest.mark.parametrize('number,expected', [(0, 0), (1, 1), (3, 3), (-1, None), (True, None), ('0', None), (0.0, None), (None, None)])
+def test_playlist_resume_fields_are_preserved(tmp_path, fixture_data, number, expected):
     raw = fixture_data('playlist.json')['contents'][1]
     raw.update(seasonID='squirtle_s3', episodeID='squirtle_s3e3', userProgress=64,
-               seasonNumber=3, episodeNumber=3)
+               seasonNumber=number, episodeNumber=3)
     (tmp_path / 'playlist.json').write_text(json.dumps({'contents': [raw]}))
     item = load_playlist(tmp_path)[0]
     assert (item.season_id, item.episode_id, item.user_progress) == ('squirtle_s3', 'squirtle_s3e3', 64)
-    assert (item.season_number, item.episode_number) == (3, 3)
+    assert (item.season_number, item.episode_number) == (expected, 3)
 
 
 def test_partial_count_and_legacy_selector_fallback(tmp_path, series, client, fixture_data):
@@ -473,26 +474,25 @@ def test_completion_changes_cached_groups_without_requests(tmp_path, series, cli
     series = replace(series, is_completed=False, user_progress=98)
     path = tmp_path / 'details.json'
     first = process_items([series], client, DetailCache(path))
-    assert sum(r.episodes_remaining for r in first) == 9
-    assert sum(r.duration_minutes for r in first) == 211
+    assert sum(r.episodes_remaining for r in first) == 3
+    assert sum(r.duration_minutes for r in first) == 63
     assert len(first) == 2
     saved = path.read_text()
     client.reset_mock()
     completed = process_items([replace(series, is_completed=True)], client, DetailCache(path))
     assert len(completed) == 1
-    assert completed[0].episodes_remaining == 8
-    assert completed[0].duration_minutes == 190
-    assert completed[0].availability_end_date == 1790805540000
-    assert completed[0].resume_episode == 'S3E4'
+    assert completed[0].episodes_remaining == 2
+    assert completed[0].duration_minutes == 42
+    assert completed[0].availability_end_date == 1788213540000
+    assert completed[0].resume_episode == 'S3E2'
     assert path.read_text() == saved
-    # Completing the preceding episode leaves both timestamp groups; every row
-    # must show the earliest actual remainder, regardless of catalog array order.
+    # The reversed Hodor sequence continues from E2 to E1, not numerically to E3.
     split = process_items(
         [replace(series, episode_id='squirtle_s3e2', is_completed=True)],
         client, DetailCache(path),
     )
-    assert len(split) == 2
-    assert {row.resume_episode for row in split} == {'S3E3'}
+    assert len(split) == 1
+    assert {row.resume_episode for row in split} == {'S3E1'}
     assert 'is_completed' not in saved and 'isCompleted' not in saved
     assert process_items([series], client, DetailCache(path)) == first
     client.fetch.assert_not_called()
@@ -609,3 +609,73 @@ def test_synthetic_helper_and_legacy_title_fallback():
     restored = catalog_from_cache(raw)
     assert restored.episodes[0].title is None
     assert _episode_label(1, restored.episodes[0]) == 'Unité non numérotée'
+
+
+@pytest.mark.parametrize('resume_id,number,completed,count,label', [
+    ('unit_a', 173, False, 4, 'S3E173'),
+    ('unit_a', 173, True, 3, 'S3E174'),
+    ('unit_b', 173, False, 2, 'S3E173'),
+    ('unit_b', 173, True, 1, 'S3E82'),
+    ('', 174, False, 3, 'S3E174'),
+    ('', 173, False, None, None),
+])
+def test_editorial_numbers_describe_but_hodor_order_progresses(
+        tmp_path, series, client, resume_id, number, completed, count, label):
+    payload = season_response(client.fetch_episodes.return_value, 3, ['21 min'] * 4, [3])
+    for entry, identity, value in zip(payload['episodes']['contents'],
+                                      ['unit_a', 'unit_middle', 'unit_b', 'unit_last'],
+                                      [173, 174, 173, 82]):
+        entry.update(contentID=identity, episodeNumber=value)
+    client.fetch_episodes.return_value = payload
+    item = replace(series, episode_id=resume_id, episode_number=number, is_completed=completed)
+    path = tmp_path / 'details.json'
+    first = process_items([item], client, DetailCache(path))[0]
+    if count is None:
+        assert first.episodes_remaining is None
+    else:
+        assert first.episodes_remaining == count
+        assert first.duration_minutes == count * 21
+        assert first.resume_episode == label
+    client.reset_mock()
+    assert process_items([item], client, DetailCache(path))[0] == first
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+
+
+@pytest.mark.parametrize('completed,expected_count,label', [
+    (False, 2, 'Mammouth'), (True, 1, 'S0E2'),
+])
+def test_cached_s0_resume_preserves_editorial_order(tmp_path, series, client, completed, expected_count, label):
+    from mycanal_hodor_core.episodes import Episode, Season, SeasonCatalog
+    season = Season('squirtle_s0', 0)
+    catalog = SeasonCatalog(season, (season,), (
+        Episode('900_50006', 90050006, 21, 1790805540000, 'Mammouth'),
+        Episode('unit_gptou', 2, 30, 1790805540000),
+    ))
+    path = tmp_path / 'details.json'
+    cache = DetailCache(path)
+    cache.put_season(series.content_id, catalog)
+    cache.save()
+    item = replace(series, season_id=season.content_id, season_number=0,
+                   episode_id='900_50006', is_completed=completed)
+    result = process_items([item], client, DetailCache(path))[0]
+    assert result.season_numbers == (0,)
+    assert result.resume_episode == label
+    assert result.episodes_remaining == expected_count
+    assert result.duration_minutes == (30 if completed else 51)
+    assert result.availability_end_date == 1790805540000
+    client.fetch_episodes.assert_not_called()
+
+
+def test_partial_playlist_s0_is_not_replaced_by_fallback(tmp_path, series, client):
+    from mycanal_expiry_tracker.detail import DetailData, ResumeFallback
+    path = tmp_path / 'details.json'
+    cache = DetailCache(path)
+    cache.put(series.content_id, DetailData(resume_fallback=ResumeFallback(
+        series.season_id, series.episode_id, 3, 3)))
+    cache.save()
+    # The cached fallback can fill the missing episode identity, but not replace S0.
+    item = replace(series, season_number=0, episode_id='', episode_number=None)
+    result = process_items([item], client, DetailCache(path))[0]
+    assert result.episodes_remaining is None
+    assert result.status != 'OK'

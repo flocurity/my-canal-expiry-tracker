@@ -113,3 +113,32 @@ def test_missing_cache_has_no_failure_diagnostic(tmp_path):
         cache = DetailCache(tmp_path / 'missing.json')
     assert cache.entries == {}
     assert not any('failure_debug' in entry['event'] for entry in logs)
+
+
+@pytest.mark.parametrize('number', [0, 1, -1, True, False, '0', 0.0, None, [], {}])
+def test_cached_season_number_contract(number):
+    from mycanal_hodor_core.episodes import Episode, Season, SeasonCatalog
+    from mycanal_expiry_tracker.catalog_cache import catalog_from_cache, catalog_to_cache
+    season = Season('season_mammouth', number)
+    catalog = SeasonCatalog(season, (season,), (
+        Episode('26219525_50006', 2621952550006, 21, None, 'Mammouth'),
+        Episode('unit_gptou', 2, 30, 1790805540000),
+    ))
+    raw = json.loads(json.dumps(catalog_to_cache(catalog)))
+    if type(number) is int and number >= 0:
+        assert catalog_from_cache(raw) == catalog
+        assert [e.content_id for e in catalog_from_cache(raw).episodes] == [
+            '26219525_50006', 'unit_gptou']
+    else:
+        with pytest.raises(ValueError, match='Invalid cached season'):
+            catalog_from_cache(raw)
+
+
+def test_resume_fallback_cache_preserves_zero(tmp_path):
+    from mycanal_expiry_tracker.detail import ResumeFallback
+    path = tmp_path / 'details.json'
+    fallback = ResumeFallback('season_mammouth', 'unit_gptou', 0, 2)
+    cache = DetailCache(path)
+    cache.put('brand_mammouth', DetailData(resume_fallback=fallback))
+    cache.save()
+    assert DetailCache(path).get('brand_mammouth').resume_fallback == fallback

@@ -103,7 +103,8 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
             raise ValueError('Incomplete playlist resume point conflicts with detail')
         season_id = season_id or fallback.season_id
         episode_id = episode_id or fallback.episode_id
-        season_number = season_number or fallback.season_number
+        if season_number is None:
+            season_number = fallback.season_number
         episode_number = episode_number or fallback.episode_number
     if not season_id or not (episode_id or episode_number):
         raise ValueError('Missing usable resume season/episode')
@@ -127,7 +128,6 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         return catalog
 
     current = catalog_for(season_id)
-    catalogs_by_number = {current.season.number: current}
     if season_number is not None and current.season.number != season_number:
         raise ValueError('Resume season coordinates disagree')
     matches = [episode for episode in current.episodes
@@ -137,15 +137,10 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     if len(matches) != 1:
         raise ValueError('Resume episode not found safely')
     resume = matches[0]
-    if any(is_synthetic_episode_number(episode) for episode in current.episodes):
-        # Mixed/un-numbered seasons follow the API's editorial order, never technical IDs.
-        resume_index = current.episodes.index(resume)
-        start = resume_index + (item.is_completed is True)
-        remaining = [(current.season.number, episode) for episode in current.episodes[start:]]
-    else:
-        remaining = [(current.season.number, episode) for episode in current.episodes
-                     if episode.number > resume.number
-                     or (episode.number == resume.number and item.is_completed is not True)]
+    # Editorial numbers describe units; only Hodor list position defines progression.
+    resume_index = current.episodes.index(resume)
+    start = resume_index + (item.is_completed is True)
+    remaining = [(current.season.number, episode) for episode in current.episodes[start:]]
     resume_label = _episode_label(current.season.number, resume)
     try:
         # The selector is catalog data, not user state. Cached selectors can therefore
@@ -164,7 +159,6 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
             later = catalog_for(season.content_id)
             if later.season != season:
                 raise ValueError('Conflicting season metadata')
-            catalogs_by_number[later.season.number] = later
             remaining.extend((later.season.number, episode) for episode in later.episodes)
             visited.add(season.content_id)
             for discovered in later.seasons:
@@ -201,11 +195,6 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     if remaining and item.is_completed is True:
         season_number = min(number for number, _ in remaining)
         candidates = [episode for number, episode in remaining if number == season_number]
-        # Inspect the whole season: an excluded synthetic resume still makes it mixed.
-        catalog = catalogs_by_number[season_number]
-        if any(is_synthetic_episode_number(episode) for episode in catalog.episodes):
-            episode = candidates[0]
-        else:
-            episode = min(candidates, key=lambda value: value.number)
+        episode = candidates[0]
         resume_label = _episode_label(season_number, episode)
     return SeriesBacklog(resume_label if remaining else '', tuple(groups))

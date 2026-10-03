@@ -9,6 +9,7 @@ from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 
+from mycanal_hodor_core.episodes import season_number
 from mycanal_hodor_core.detail import declares_detail_v5 as _declares_detail_v5
 
 log = get_logger(__name__)
@@ -130,7 +131,7 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
                 is_completed=raw.get('isCompleted') is True,
                 season_id=_text(raw.get('seasonID')),
                 episode_id=_text(raw.get('episodeID')),
-                season_number=_positive_number(raw.get('seasonNumber')),
+                season_number=season_number(raw.get('seasonNumber')),
                 episode_number=_positive_number(raw.get('episodeNumber')),
                 user_progress=(raw.get('userProgress')
                                if type(raw.get('userProgress')) is int else None),
