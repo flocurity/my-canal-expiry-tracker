@@ -88,7 +88,7 @@ def test_cached_catalog_uses_new_playlist_resume_and_token(tmp_path, series, cli
     catalog = raw['season:squirtle_brand:squirtle_s3']['catalog']
     assert set(catalog) == {'season', 'seasons', 'episodes'}
     assert set(catalog['episodes'][0]) == {
-        'content_id', 'number', 'duration_minutes', 'availability_end_date',
+        'content_id', 'number', 'duration_minutes', 'availability_end_date', 'title',
     }
     for forbidden in ['https://', 'userProgress', 'isCompleted', 'resume_episode',
                       'tokenPass', 'a' * 32, 'b' * 32, 'S3E3', 'S3E5']:
@@ -549,3 +549,63 @@ def test_movie_completion_does_not_change_report(tmp_path, item, client, fixture
     completed_item = replace(item, is_completed=True)
     completed = process_items([completed_item], client, cache)
     assert completed == [replace(original, item=completed_item)]
+
+
+@pytest.mark.parametrize('completed,expected_label,expected_count', [
+    (False, 'Mammouth', 3), (True, 'S3E2', 2),
+])
+def test_mixed_season_uses_editorial_order_and_preserves_cached_titles(
+        tmp_path, series, client, completed, expected_label, expected_count):
+    payload = season_response(client.fetch_episodes.return_value, 3, ['21 min'] * 4, [3])
+    payload['episodes']['contents'] = [
+        {'contentID': '900_50006', 'title': 'Before', 'durationLabel': '21 min'},
+        {'contentID': '800_50006', 'title': 'Mammouth', 'durationLabel': '21 min'},
+        {'contentID': 'normal_gptou', 'episodeNumber': 2, 'durationLabel': '21 min'},
+        {'contentID': '100_50006', 'title': 'After', 'durationLabel': '21 min'},
+    ]
+    client.fetch_episodes.return_value = payload
+    item = replace(series, episode_id='800_50006', is_completed=completed)
+    path = tmp_path / 'details.json'
+    first = process_items([item], client, DetailCache(path))[0]
+    assert first.resume_episode == expected_label
+    assert first.episodes_remaining == expected_count
+    assert first.duration_minutes == expected_count * 21
+    client.reset_mock()
+    assert process_items([item], client, DetailCache(path))[0] == first
+    client.fetch_episodes.assert_not_called()
+    raw = json.loads(path.read_text())
+    episodes = raw['season:squirtle_brand:squirtle_s3']['catalog']['episodes']
+    assert [episode['content_id'] for episode in episodes] == [
+        '900_50006', '800_50006', 'normal_gptou', '100_50006']
+    assert episodes[1]['title'] == 'Mammouth'
+
+
+def test_completed_resume_uses_first_editorial_unit_of_later_season(tmp_path, series, client):
+    template = client.fetch_episodes.return_value
+    current = season_response(template, 3, ['21 min'], [3, 5])
+    later = season_response(template, 5, ['21 min', '21 min'], [3, 5])
+    later['episodes']['contents'] = [
+        {'contentID': '900_50006', 'title': 'First editorial unit', 'durationLabel': '21 min'},
+        {'contentID': '100_50006', 'title': 'Second editorial unit', 'durationLabel': '21 min'}]
+    client.fetch_episodes.side_effect = [current, later]
+    item = replace(series, episode_id='squirtle_s3e1', is_completed=True)
+    result = process_items([item], client, DetailCache(tmp_path / 'details.json'))[0]
+    assert result.resume_episode == 'First editorial unit'
+    assert result.episodes_remaining == 2
+
+
+def test_synthetic_helper_and_legacy_title_fallback():
+    from mycanal_hodor_core.episodes import Episode, Season, SeasonCatalog
+    from mycanal_expiry_tracker.series import is_synthetic_episode_number, _episode_label
+    from mycanal_expiry_tracker.catalog_cache import catalog_to_cache, catalog_from_cache
+    synthetic = Episode('123_45', 12345, 21, None, 'Mammouth')
+    assert is_synthetic_episode_number(synthetic)
+    assert is_synthetic_episode_number(Episode('1_2', 12, 21, None))
+    assert not is_synthetic_episode_number(Episode('123_45', 20000, 21, None))
+    assert not is_synthetic_episode_number(Episode('invalid_id', 12345, 21, None))
+    season = Season('season_mammouth', 1)
+    raw = catalog_to_cache(SeasonCatalog(season, (season,), (synthetic,)))
+    del raw['episodes'][0]['title']
+    restored = catalog_from_cache(raw)
+    assert restored.episodes[0].title is None
+    assert _episode_label(1, restored.episodes[0]) == 'Unité non numérotée'

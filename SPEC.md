@@ -793,3 +793,5 @@ Start by examining the example JSON files present in `input/` rather than assumi
 Then implement the complete V1.
 
 Once the code is written, run the tests and then run the program against the example JSON files if the environment allows it.
+
+Unnumbered episode units are recognized only when their technical number equals the validated content ID with underscores removed. Mixed and unnumbered seasons use Hodor list order for resume/backlog selection; fully numbered seasons retain numeric progression. Optional raw episode titles are cached (older entries default to null). Resume labels use the title for unnumbered units, or `Unité non numérotée` with a warning when unavailable, never a technical E-number.

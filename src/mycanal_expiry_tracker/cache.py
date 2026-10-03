@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 from mycanal_expiry_tracker.detail import DetailData, ResumeFallback
@@ -40,6 +41,7 @@ class DetailCache:
             pass
         except (OSError, ValueError) as exc:
             log.warning('cache_read_failed', path=str(path), reason=str(exc))
+            debug_failure(log, 'cache_failure_debug', exc)
 
     @staticmethod
     def _normalize_entry(entry: object) -> dict | None:
@@ -172,9 +174,11 @@ class DetailCache:
             self.dirty = False
         except OSError as exc:
             log.warning('cache_write_failed', path=str(self.path), reason=str(exc))
+            debug_failure(log, 'cache_failure_debug', exc)
         finally:
             if temporary is not None:
                 try:
                     temporary.unlink(missing_ok=True)
                 except OSError as exc:
                     log.warning('cache_cleanup_failed', reason=str(exc))
+                    debug_failure(log, 'cache_failure_debug', exc)

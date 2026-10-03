@@ -5,6 +5,7 @@ import math
 from collections import Counter
 from pathlib import Path
 
+from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.console import configure_console
 from mycanal_expiry_tracker.acquisition import AcquisitionError, acquire_pages, parse_curl, publish_pages, read_curl
@@ -47,6 +48,10 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
             paths = publish_pages(pages, workdir / 'input')
         except (AcquisitionError, DetailError) as exc:
             log.error('acquisition_failed', reason=str(exc))
+            request_context = locals().get('context')
+            secrets = ((request_context.hodor_token, request_context.token_pass, request_context.profile_id)
+                       if request_context is not None else ())
+            debug_failure(log, 'acquisition_failure_debug', exc, secrets)
             return 1
         except (OSError, EOFError, KeyboardInterrupt):
             log.error('acquisition_failed', reason='Acquisition interrupted or input/output unavailable')
@@ -64,6 +69,7 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
         write_excel(results, destination)
     except (PlaylistError, OSError, ValueError) as exc:
         log.error('export_failed', reason=str(exc))
+        debug_failure(log, 'export_failure_debug', exc)
         return 1
     statuses = Counter(result.status for result in results)
     log.info('export_completed', output=str(destination), items=len(results),

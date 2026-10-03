@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 
@@ -93,6 +94,7 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
             pages.append(data['contents'])
         except (OSError, ValueError) as exc:
             errors.append(f'{path}: {exc}')
+            debug_failure(log, 'playlist_parsing_debug', exc, path=str(path))
     if errors:
         raise PlaylistError('\n'.join(errors))
 

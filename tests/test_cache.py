@@ -105,3 +105,11 @@ def test_invalid_raw_timestamp_is_a_miss(tmp_path, value):
     cache.put('id', DetailData())
     cache.entries['id']['availability_end_date'] = value
     assert cache.get('id') is None
+
+
+def test_missing_cache_has_no_failure_diagnostic(tmp_path):
+    from structlog.testing import capture_logs
+    with capture_logs() as logs:
+        cache = DetailCache(tmp_path / 'missing.json')
+    assert cache.entries == {}
+    assert not any('failure_debug' in entry['event'] for entry in logs)

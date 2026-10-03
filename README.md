@@ -312,3 +312,5 @@ Logging is configured explicitly by CLI startup. Importing Core does not configu
 global logging; applications may select other structlog processors. The shared
 `timeit()` remains synchronous and inclusive, preserving exceptions even when
 logging fails. Existing timing placements remain in Expiry.
+
+Failure diagnostics follow the configured structlog DEBUG level. Normal error events stay unchanged; DEBUG adds sanitized HTTP response bodies/context or exception chains without frame locals. INFO and higher suppress these details. Existing console log-level defaults are unchanged.

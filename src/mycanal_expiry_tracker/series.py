@@ -1,4 +1,5 @@
 """Personal backlog selection using the shared Hodor episode catalog."""
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -17,6 +18,27 @@ from .playlist import PlaylistItem
 if TYPE_CHECKING:
     from .cache import DetailCache
 log = get_logger(__name__)
+
+def is_synthetic_episode_number(episode: Episode) -> bool:
+    content_id = identifier(episode.content_id)
+    digits = content_id.replace('_', '')
+    if not digits or not re.fullmatch(r'[0-9]+', digits):
+        return False
+    try:
+        return episode.number == int(digits)
+    except ValueError:
+        return False
+
+
+def _episode_label(season_number: int, episode: Episode) -> str:
+    if not is_synthetic_episode_number(episode):
+        return f'S{season_number}E{episode.number}'
+    if episode.title and episode.title.strip():
+        return episode.title
+    log.warning('series_episode_title_unknown', content_id=episode.content_id,
+                season_number=season_number)
+    return 'Unité non numérotée'
+
 
 @dataclass(frozen=True)
 class ExpirationGroup:
@@ -105,19 +127,26 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         return catalog
 
     current = catalog_for(season_id)
+    catalogs_by_number = {current.season.number: current}
     if season_number is not None and current.season.number != season_number:
         raise ValueError('Resume season coordinates disagree')
     matches = [episode for episode in current.episodes
                if episode_id and episode.content_id == episode_id]
     if not matches and episode_number is not None:
-        matches = [episode for episode in current.episodes if episode.number == episode_number]
+        matches = [episode for episode in current.episodes if not is_synthetic_episode_number(episode) and episode.number == episode_number]
     if len(matches) != 1:
         raise ValueError('Resume episode not found safely')
     resume = matches[0]
-    remaining = [(current.season.number, episode) for episode in current.episodes
-                 if episode.number > resume.number
-                 or (episode.number == resume.number and item.is_completed is not True)]
-    resume_label = f'S{current.season.number}E{resume.number}'
+    if any(is_synthetic_episode_number(episode) for episode in current.episodes):
+        # Mixed/un-numbered seasons follow the API's editorial order, never technical IDs.
+        resume_index = current.episodes.index(resume)
+        start = resume_index + (item.is_completed is True)
+        remaining = [(current.season.number, episode) for episode in current.episodes[start:]]
+    else:
+        remaining = [(current.season.number, episode) for episode in current.episodes
+                     if episode.number > resume.number
+                     or (episode.number == resume.number and item.is_completed is not True)]
+    resume_label = _episode_label(current.season.number, resume)
     try:
         # The selector is catalog data, not user state. Cached selectors can therefore
         # discover later seasons without fetching detail again on a fully cached run.
@@ -135,6 +164,7 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
             later = catalog_for(season.content_id)
             if later.season != season:
                 raise ValueError('Conflicting season metadata')
+            catalogs_by_number[later.season.number] = later
             remaining.extend((later.season.number, episode) for episode in later.episodes)
             visited.add(season.content_id)
             for discovered in later.seasons:
@@ -169,8 +199,13 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     except (DetailError, ValueError) as exc:
         raise SeriesIncomplete(exc, resume_label) from exc
     if remaining and item.is_completed is True:
-        season_number, episode = min(
-            remaining, key=lambda member: (member[0], member[1].number),
-        )
-        resume_label = f'S{season_number}E{episode.number}'
+        season_number = min(number for number, _ in remaining)
+        candidates = [episode for number, episode in remaining if number == season_number]
+        # Inspect the whole season: an excluded synthetic resume still makes it mixed.
+        catalog = catalogs_by_number[season_number]
+        if any(is_synthetic_episode_number(episode) for episode in catalog.episodes):
+            episode = candidates[0]
+        else:
+            episode = min(candidates, key=lambda value: value.number)
+        resume_label = _episode_label(season_number, episode)
     return SeriesBacklog(resume_label if remaining else '', tuple(groups))

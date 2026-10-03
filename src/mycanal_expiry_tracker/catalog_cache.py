@@ -33,7 +33,9 @@ def catalog_from_cache(raw: object) -> SeasonCatalog:
         minutes = value.get('duration_minutes')
         if minutes is not None and positive_number(minutes) is None:
             raise ValueError('Invalid cached episode duration')
-        episodes.append(Episode(episode_id, value['number'], minutes, timestamp))
+        title = value.get('title')
+        episodes.append(Episode(episode_id, value['number'], minutes, timestamp,
+                                title if isinstance(title, str) else None))
     validate_catalog(season, seasons, episodes)
     return SeasonCatalog(season, seasons, tuple(episodes))
 

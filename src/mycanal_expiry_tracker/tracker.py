@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date
 
+from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 from mycanal_expiry_tracker.cache import DetailCache
@@ -85,9 +86,11 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
                 resume_episode = exc.resume_episode
             status = exc.status
             log.error('content_failed', content_id=item.content_id, status=status, reason=str(exc))
+            debug_failure(log, 'content_failure_debug', exc, content_id=item.content_id)
         except ValueError as exc:
             status = 'Série incomplète' if item.content_type == 'folder' else 'Erreur parsing'
             log.error('content_failed', content_id=item.content_id, status=status, reason=str(exc))
+            debug_failure(log, 'content_failure_debug', exc, content_id=item.content_id)
         if backlog is not None:
             if not backlog.groups:
                 # A validated empty backlog still represents a playlist item,
