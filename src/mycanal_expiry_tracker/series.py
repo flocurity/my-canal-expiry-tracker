@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 def is_synthetic_episode_number(episode: Episode) -> bool:
+    # The absent-number fallback is strictly positive; explicit zero is editorial.
+    if episode.number == 0:
+        return False
     content_id = identifier(episode.content_id)
     digits = content_id.replace('_', '')
     if not digits or not re.fullmatch(r'[0-9]+', digits):
@@ -77,7 +80,7 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         result = _navigation(payload)
         base_url, episode_id, season_number, episode_number = result
         season_id = _url_season(base_url)
-        if season_id and (episode_id or episode_number):
+        if season_id and (episode_id or episode_number is not None):
             detail = cache.get(item.content_id)
             if detail is not None:
                 cache.put(item.content_id, replace(detail, resume_fallback=ResumeFallback(
@@ -90,7 +93,7 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
     season_id = identifier(item.season_id)
     episode_id = identifier(item.episode_id)
     season_number, episode_number = item.season_number, item.episode_number
-    if not season_id or not (episode_id or episode_number):
+    if not season_id or not (episode_id or episode_number is not None):
         detail = None if refresh else cache.get(item.content_id)
         fallback = detail.resume_fallback if detail is not None else None
         if fallback is None:
@@ -105,8 +108,9 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         episode_id = episode_id or fallback.episode_id
         if season_number is None:
             season_number = fallback.season_number
-        episode_number = episode_number or fallback.episode_number
-    if not season_id or not (episode_id or episode_number):
+        if episode_number is None:
+            episode_number = fallback.episode_number
+    if not season_id or not (episode_id or episode_number is not None):
         raise ValueError('Missing usable resume season/episode')
 
     def catalog_for(requested_id: str) -> SeasonCatalog:

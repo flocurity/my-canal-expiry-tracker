@@ -1,6 +1,6 @@
 """Tracker-only serialization of shared season models; preserves existing cache JSON."""
 from dataclasses import asdict
-from mycanal_hodor_core.episodes import Season, Episode, SeasonCatalog, identifier, positive_number, season_number, validate_catalog
+from mycanal_hodor_core.episodes import Season, Episode, SeasonCatalog, identifier, positive_number, season_number, episode_number, validate_catalog
 from mycanal_hodor_core.timing import timeit
 from .expiration import availability_from_raw
 
@@ -22,7 +22,7 @@ def catalog_from_cache(raw: object) -> SeasonCatalog:
     seasons = tuple(_cached_season(value) for value in seasons_raw)
     episodes = []
     for value in episodes_raw:
-        if not isinstance(value, dict) or not positive_number(value.get('number')):
+        if not isinstance(value, dict) or episode_number(value.get('number')) is None:
             raise ValueError('Invalid cached episode')
         episode_id = value.get('content_id')
         if not isinstance(episode_id, str) or (episode_id and not identifier(episode_id)):

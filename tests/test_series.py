@@ -679,3 +679,35 @@ def test_partial_playlist_s0_is_not_replaced_by_fallback(tmp_path, series, clien
     result = process_items([item], client, DetailCache(path))[0]
     assert result.episodes_remaining is None
     assert result.status != 'OK'
+
+
+@pytest.mark.parametrize('identity,completed,duplicate,count,label', [
+    ('pilot', False, False, 3, 'S1E0'),
+    ('pilot', True, False, 2, 'S1E1'),
+    ('', False, False, 3, 'S1E0'),
+    ('', False, True, None, None),
+    ('pilot', False, True, 3, 'S1E0'),
+])
+def test_real_zero_resume_and_cached_hodor_order(tmp_path, series, client, identity, completed, duplicate, count, label):
+    from mycanal_hodor_core.episodes import Episode, Season, SeasonCatalog
+    from mycanal_expiry_tracker.series import is_synthetic_episode_number
+    season = Season('squirtle_s1', 1)
+    episodes = (Episode('pilot', 0, 63, 1790805540000, 'The Pilot'),
+                Episode('next', 1, 30, 1790805540000),
+                Episode('last', 0 if duplicate else 2, 30, 1790805540000))
+    assert not is_synthetic_episode_number(episodes[0])
+    assert not is_synthetic_episode_number(Episode('0_0', 0, 63, None))
+    path = tmp_path/'details.json'
+    cache = DetailCache(path)
+    cache.put_season(series.content_id, SeasonCatalog(season,(season,),episodes))
+    cache.save()
+    assert DetailCache(path).get_season(series.content_id, season.content_id).episodes == episodes
+    item = replace(series, season_id=season.content_id, season_number=1,
+                   episode_id=identity, episode_number=0, is_completed=completed)
+    result = process_items([item], client, DetailCache(path))[0]
+    assert result.episodes_remaining == count
+    if count is not None:
+        assert result.resume_episode == label
+        assert result.duration_minutes == (60 if completed else 123)
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()

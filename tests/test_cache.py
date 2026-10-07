@@ -142,3 +142,13 @@ def test_resume_fallback_cache_preserves_zero(tmp_path):
     cache.put('brand_mammouth', DetailData(resume_fallback=fallback))
     cache.save()
     assert DetailCache(path).get('brand_mammouth').resume_fallback == fallback
+
+
+def test_zero_number_only_resume_fallback_survives_cache(tmp_path):
+    from mycanal_expiry_tracker.detail import ResumeFallback
+    path = tmp_path/'details.json'
+    fallback = ResumeFallback('season_mammouth', '', 1, 0)
+    cache = DetailCache(path)
+    cache.put('brand_mammouth', DetailData(resume_fallback=fallback))
+    cache.save()
+    assert DetailCache(path).get('brand_mammouth').resume_fallback == fallback

@@ -797,3 +797,5 @@ Once the code is written, run the tests and then run the program against the exa
 Unnumbered episode units are recognized only when their technical number equals the validated content ID with underscores removed. All seasons use preserved Hodor list order for resume/backlog selection. Distinct content IDs may share a real editorial episode number; number-only resume resolution requires exactly one match. Optional raw episode titles are cached (older entries default to null). Resume labels use the title for unnumbered units, or `Unité non numérotée` with a warning when unavailable, never a technical E-number.
 
 Expiry preserves integer season numbers >= 0, including S0, in playlist input, resume fallback and catalog cache round-trips. Missing or invalid season numbers are never coerced into zero; episode list order remains Hodor order.
+
+Explicit episode numbers are integers >= 0 (bool and other present invalid types are rejected). Only an absent number uses the positive synthetic identity fallback. Episode zero survives playlist/cache/resume handling and follows Hodor list order; current numbered resume labels remain SxE0.

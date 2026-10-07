@@ -12,7 +12,7 @@ from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 from mycanal_expiry_tracker.detail import DetailData, ResumeFallback
 from mycanal_expiry_tracker.expiration import availability_from_raw
-from mycanal_hodor_core.episodes import SeasonCatalog, identifier, positive_number, season_number
+from mycanal_hodor_core.episodes import SeasonCatalog, identifier, positive_number, season_number, episode_number as valid_episode_number
 from .catalog_cache import catalog_from_cache, catalog_to_cache
 
 log = get_logger(__name__)
@@ -91,8 +91,8 @@ class DetailCache:
         if isinstance(fallback, dict):
             resume_season = identifier(fallback.get('season_id'))
             episode_id = identifier(fallback.get('episode_id'))
-            episode_number = positive_number(fallback.get('episode_number'))
-            if resume_season and (episode_id or episode_number):
+            episode_number = valid_episode_number(fallback.get('episode_number'))
+            if resume_season and (episode_id or episode_number is not None):
                 normalized['resume_fallback'] = asdict(ResumeFallback(
                     resume_season, episode_id,
                     season_number(fallback.get('season_number')), episode_number,
