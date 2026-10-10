@@ -33,8 +33,8 @@ class ContentResult:
 
 
 @timeit()
-def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailCache,
-                  refresh: bool = False) -> list[ContentResult]:
+def process_items(items: list[PlaylistItem], client: CanalClient | None, cache: DetailCache,
+                  refresh: bool = False, *, offline: bool = False) -> list[ContentResult]:
     results = []
     for index, item in enumerate(items, start=1):
         expiration = None
@@ -49,6 +49,7 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
         # enrichment (subgenre) is brand-level, independent of the resume season.
         resource_id = '' if item.content_type == 'folder' else item.season_content_id
         detail = None if refresh else cache.get(item.content_id, resource_id)
+        local_incomplete = offline and detail is None
         if detail is not None:
             subgenre = detail.subgenre
             log.debug('cache_hit', content_id=item.content_id)
@@ -56,6 +57,9 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
         def load_detail() -> dict:
             nonlocal payload, detail, subgenre
             if payload is None:
+                if offline:
+                    raise DetailError('Détail absent des données locales',
+                                      'Données locales incomplètes')
                 request_url = build_detail_url(item.detail_url, item.supports_detail_v5)
                 payload = client.fetch(request_url, item.content_id)
                 timestamp, label = extract_raw_availability(payload)
@@ -71,7 +75,7 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
 
         try:
             if item.content_type == 'folder':
-                backlog = enrich_series(item, client, cache, load_detail, refresh)
+                backlog = enrich_series(item, client, cache, load_detail, refresh, offline=offline)
                 resume_episode = backlog.resume_episode
             else:
                 if detail is None:
@@ -81,6 +85,8 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
                 )
                 duration_minutes = detail.duration_minutes
             status = 'OK' if expiration else 'Date inconnue'
+            if local_incomplete:
+                status = 'Données locales incomplètes'
         except DetailError as exc:
             if isinstance(exc, SeriesIncomplete):
                 resume_episode = exc.resume_episode
@@ -96,12 +102,14 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
                 # A validated empty backlog still represents a playlist item,
                 # but has no expiration group to report.
                 results.append(ContentResult(
-                    item, None, 'Date inconnue', subgenre,
+                    item, None, status, subgenre,
                     duration_minutes=0, episodes_remaining=0,
                 ))
             for group in backlog.groups:
                 expiration, availability_text = availability_from_raw(group.availability_end_date)
                 status = 'OK' if expiration else 'Date inconnue'
+                if local_incomplete:
+                    status = 'Données locales incomplètes'
                 results.append(ContentResult(
                     item, expiration, status, subgenre, group.duration_minutes,
                     availability_text, resume_episode, group.episodes_remaining,
@@ -113,5 +121,6 @@ def process_items(items: list[PlaylistItem], client: CanalClient, cache: DetailC
                                          resume_episode, episodes_remaining))
         log.info('content_processed', index=index, total=len(items), title=item.title,
                  expiration=expiration, status=status)
-    cache.save()
+    if not offline:
+        cache.save()
     return results

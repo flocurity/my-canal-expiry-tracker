@@ -6,13 +6,16 @@ from mycanal_hodor_core.http import DEFAULT_DELAY, TIMEOUT_SECONDS, MAX_ATTEMPTS
 
 
 class DetailError(Exception):
-    def __init__(self, message: str, status: str = 'Erreur HTTP') -> None:
+    def __init__(self, message: str, status: str = 'Erreur HTTP',
+                 status_code: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.status_code = status_code
 
 
 def _report_error(error: http.HodorError) -> DetailError:
-    return DetailError(str(error), 'Erreur parsing' if error.kind == 'parsing' else 'Erreur HTTP')
+    return DetailError(str(error), 'Erreur parsing' if error.kind == 'parsing' else 'Erreur HTTP',
+                       error.status_code)
 
 
 def validate_api_url(url: str, resource: str) -> None:

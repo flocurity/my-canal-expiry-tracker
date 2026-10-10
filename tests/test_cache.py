@@ -21,11 +21,11 @@ def test_cache_roundtrip_including_unknown(tmp_path, item):
 
 
 @pytest.mark.parametrize('age', [timedelta(hours=25), timedelta(hours=-1)])
-def test_cache_expiration(tmp_path, age):
+def test_cache_has_no_ttl(tmp_path, age):
     cache = DetailCache(tmp_path / 'details.json')
     cache.put('id', DetailData())
     cache.entries['id']['retrieved_at'] = (datetime.now(timezone.utc) - age).isoformat()
-    assert cache.get('id') is None
+    assert cache.get('id') == DetailData()
 
 
 @pytest.mark.parametrize('value', ['bad json', '[]', '{"id":null}', '{"id":{"retrieved_at":3}}'])

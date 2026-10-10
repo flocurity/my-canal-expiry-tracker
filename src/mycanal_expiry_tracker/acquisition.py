@@ -13,6 +13,9 @@ from mycanal_hodor_core.bootstrap import (
     BootstrapError, HodorRuntimeContext, parse_curl as parse_browser_curl, read_curl,
 )
 from mycanal_hodor_core.logging import get_logger
+from mycanal_hodor_core.authentication import PassIdAuth, recover_authentication
+from mycanal_hodor_core.http import HodorError
+from .canal_api import DetailError
 from mycanal_expiry_tracker.canal_api import CanalClient
 
 log = get_logger(__name__)
@@ -39,18 +42,19 @@ def parse_curl(command: str) -> RequestContext:
     return context
 
 
-def contains_authentication(value: object, context: RequestContext) -> bool:
+def contains_authentication(value: object, context: RequestContext,
+                            secrets: tuple[str, ...] = ()) -> bool:
     """Raw bodies cannot be redacted, so refuse an echoed authentication context."""
     if isinstance(value, dict):
         return any(
-            key.casefold() in ('tokenpass', 'xx-profile-id')
-            or contains_authentication(child, context)
+            key.casefold() in ('passid', 'passtoken', 'tokenpass', 'xx-profile-id')
+            or contains_authentication(child, context, secrets)
             for key, child in value.items()
         )
     if isinstance(value, list):
-        return any(contains_authentication(child, context) for child in value)
+        return any(contains_authentication(child, context, secrets) for child in value)
     return isinstance(value, str) and (
-        context.token_pass in value or context.profile_id in value
+        any(secret in value for secret in (*secrets, context.token_pass, context.profile_id) if secret)
     )
 
 
@@ -65,7 +69,8 @@ def _move_without_overwrite(source: Path, destination: Path) -> None:
         raise
 
 
-def acquire_pages(context: RequestContext, client: CanalClient) -> list[bytes]:
+def acquire_pages(context: RequestContext, client: CanalClient,
+                  authentication: PassIdAuth | None = None) -> list[bytes]:
     def checked_object(pairs: list[tuple[str, object]]) -> dict:
         result = {}
         for key, value in pairs:
@@ -75,6 +80,7 @@ def acquire_pages(context: RequestContext, client: CanalClient) -> list[bytes]:
         return result
 
     pages = []
+    recovered = False
     cursors = set()
     cursor = None
     total = 0
@@ -86,15 +92,23 @@ def acquire_pages(context: RequestContext, client: CanalClient) -> list[bytes]:
             query.append(('after', cursor))
         url = (f'https://hodor.canalplus.pro/api/v2/mycanal/me/'
                f'{context.hodor_token}/lists/playlist?{urlencode(query)}')
-        raw = client.fetch_playlist_page(url, {
-            'tokenPass': context.token_pass, 'xx-profile-id': context.profile_id,
-        })
+        headers = dict(authentication.headers) if authentication is not None else context.headers
+        try:
+            raw = client.fetch_playlist_page(url, headers)
+        except DetailError as error:
+            if recovered or not recover_authentication(
+                    HodorError('Authentication failure', status_code=error.status_code),
+                    authentication, headers):
+                raise
+            recovered = True
+            raw = client.fetch_playlist_page(url, headers)
         try:
             payload = json.loads(raw, object_pairs_hook=checked_object)
         except (ValueError, UnicodeError, RecursionError):
             raise AcquisitionError('Response is not valid JSON') from None
         try:
-            sensitive = contains_authentication(payload, context)
+            secrets = tuple(authentication.secrets) if authentication is not None else ()
+            sensitive = contains_authentication(payload, context, secrets)
         except RecursionError:
             raise AcquisitionError('Unexpected JSON nesting') from None
         if sensitive:
@@ -125,7 +139,9 @@ def acquire_pages(context: RequestContext, client: CanalClient) -> list[bytes]:
 
 
 def publish_pages(pages: list[bytes], directory: Path,
-                  exported_at: datetime | None = None) -> list[Path]:
+                  exported_at: datetime | None = None, *,
+                  profile_id: str | None = None,
+                  cache_directory: Path | None = None) -> list[Path]:
     """Stage fully acquired pages before archiving; roll back ordinary I/O failures."""
     stamp = (exported_at or datetime.now(ZoneInfo('Europe/Paris'))).astimezone(
         ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d.%H-%M')
@@ -139,6 +155,12 @@ def publish_pages(pages: list[bytes], directory: Path,
         raise AcquisitionError('Active input must be a regular file')
     if any(path.exists() and path not in old for path in destinations):
         raise AcquisitionError('Export filename collision')
+    profile_file = directory / '.acquisition-profile'
+    if profile_file.is_symlink() or (profile_file.exists() and not profile_file.is_file()):
+        raise AcquisitionError('Acquisition profile metadata must be a regular file')
+    if cache_directory is not None and (cache_directory.is_symlink()
+                                       or (cache_directory.exists() and not cache_directory.is_dir())):
+        raise AcquisitionError('Cache must be a regular directory')
     archived, published = [], []
     try:
         directory.mkdir(parents=True, exist_ok=True)
@@ -149,18 +171,36 @@ def publish_pages(pages: list[bytes], directory: Path,
                 path.touch(mode=0o600)
                 path.write_bytes(raw)
                 staged.append(path)
+            previous_profile = Path(temporary) / 'previous-profile'
+            previous_cache = Path(temporary) / 'previous-cache'
+            staged_profile = Path(temporary) / 'profile'
+            if profile_id is not None:
+                staged_profile.write_text(json.dumps({'profileId': profile_id}))
             try:
+                # Metadata and cache invalidation participate in the same rollback
+                # as playlist publication; acquisition failures never reach here.
+                if profile_id is not None and profile_file.exists():
+                    _move_without_overwrite(profile_file, previous_profile)
+                if cache_directory is not None and cache_directory.exists():
+                    cache_directory.rename(previous_cache)
                 for source, backup in backups:
                     _move_without_overwrite(source, backup)
                     archived.append((source, backup))
                 for source, destination in zip(staged, destinations):
                     _move_without_overwrite(source, destination)
                     published.append(destination)
+                if profile_id is not None:
+                    _move_without_overwrite(staged_profile, profile_file)
+                    published.append(profile_file)
             except (OSError, KeyboardInterrupt):
                 for destination in published:
                     destination.unlink()
                 for source, backup in reversed(archived):
                     _move_without_overwrite(backup, source)
+                if previous_profile.exists():
+                    _move_without_overwrite(previous_profile, profile_file)
+                if previous_cache.exists():
+                    previous_cache.rename(cache_directory)
                 raise
     except OSError:
         raise AcquisitionError('Unable to publish playlist export; check input permissions') from None

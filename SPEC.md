@@ -4,31 +4,40 @@ I want to create a small Python tool that generates an Excel file from my myCANA
 
 ## General principle
 
-The report reads raw playlist responses from `input/*.json`. Manual DevTools
-exports remain supported; optional `--getinfo` acquires them using transient
-request context copied from the user's authenticated browser session. The
-application implements no login or authentication bypass.
+Normal execution authenticates through Core using the shared keyring passId,
+acquires the complete playlist, fetches fresh public enrichment, and generates
+Excel. `--curl` is the explicit browser alternative. `--from-cache` is strictly
+offline, without authentication or HTTP, and uses the latest local data regardless
+of age. Missing required local enrichment produces explicit partial rows with
+`Données locales incomplètes`, never a network fallback. `--getinfo` is removed.
+Reject `--from-cache` with `--curl` or `--refresh`; `--refresh` remains a compatible
+fresh-run option. `--auth set/delete` manages Core's common keyring entry.
 
-## Optional raw acquisition (`--getinfo`)
+## Authentication and raw acquisition
 
-Use a native `prompt_toolkit.prompt(..., multiline=True)` for Firefox Copy-as-cURL
-from Mes Vidéos. Submit with Esc, then Enter; pass the returned text unchanged to
-the shared Core browser parser. Expiry retains the playlist-specific endpoint validation.
-Parse it with shell-style tokenization only; never execute shell code or curl.
-Accept a GET HTTPS Hodor `/api/v2/mycanal/me/<token>/lists/playlist` request,
-currently validating the observed 32 hexadecimal character token shape. Require
-nonempty case-insensitive `tokenPass` and `xx-profile-id` headers. Reject
-ambiguous URLs/required headers, unsupported options or request contexts before
-network or filesystem changes. Ignore other copied headers/cookies; retain only
-the required in-memory context. Do not store or log the pasted text, credentials
-or extracted path token. Per user clarification, API-returned tokenized URLs
-remain untouched inside raw exports. Refuse bodies echoing authentication
-headers/values rather than modifying them.
+Core owns passId/keyring bootstrap, profile selection, renewal, cURL parsing and
+secret redaction. Both applications use `mycanal-catalog` / `passId` in the native
+secure keyring. Preferences are independent, with explicit selection/confirmation;
+Expiry uses `mycanal-expiry-tracker/profile.json` in the OS config directory. Only
+successfully authenticated profile choices are written. Invalid remembered IDs
+have no selection default; preference retirement is deferred until authentication
+succeeds, so network/authentication failure cannot delete it.
+
+passId builds the playlist URL from the bootstrap's Hodor token, without injecting
+browser feature toggles. cURL uses Core's inert parser and optional multiline
+prompt (Esc then Enter), with no persistent history. Expiry validates the exact
+HTTPS `/api/v2/mycanal/me/<32-hex-token>/lists/playlist` endpoint. Ignore copied
+cookies and unrelated headers. Never store/log passId, tokenPass, profile headers
+or pasted commands. Preserve API-returned tokenized URLs in original raw exports;
+refuse responses echoing authentication keys or any current/historical secret.
+Keep HodorRuntimeContext immutable; use current authentication headers after a
+renewal. No periodic rotation during acquisition. Allow only one 401/403 recovery
+across all pages, via Core, then fail explicitly. cURL has no renewable passId.
 
 Use the existing Hodor client transport, Firefox User-Agent, gzip/deflate,
 timeouts, pacing and retries, with request-scoped authentication headers and no
 redirects. Request the playlist endpoint with `maxContentRemaining=500`, `get=100`.
-Preserve the copied browser query parameters (including any explicit feature
+In cURL mode, preserve the copied browser query parameters (including any explicit feature
 toggles, display and discovery settings); replace all copied `get`,
 `maxContentRemaining` and `after` parameters. Do not inject feature toggles.
 Authentication context must be in headers, never query parameters.
@@ -48,7 +57,12 @@ overwritten: a backup collision aborts with a safe error. Publication uses
 same-filesystem no-overwrite moves and rollback on ordinary I/O errors; it cannot
 promise atomicity across a process crash or failed rollback. Run one exporter at
 a time. Acquisition/validation failure makes no changes to the old active inputs.
-No detail/season cache or report is touched by acquisition.
+Keep the last successfully published profile in `input/.acquisition-profile`,
+not inside the cache. When that profile changes or is unknown, remove the entire
+cache directory transactionally with playlist publication. Roll back profile
+metadata and cache movement with ordinary publication failures. Acquisition
+failure leaves all previous inputs, cache and report unchanged. No silent fallback.
+After successful publication, enrich fresh and generate the report.
 
 Log page numbers/counts and safe failure categories, never sensitive request
 data or response contents. The command exits with code 1 on failure and 0 on
@@ -62,9 +76,10 @@ Three independent projects, with no enclosing uv workspace:
 
 - Public `mycanal-hodor-core`, namespace `mycanal_hodor_core`: conservative Hodor
   transport, URL security, technical errors, JSON decoding, detailV5 transformation,
-  raw availability/detail extraction, canonical season/episode models and navigation.
+  raw availability/detail extraction, canonical season/episode models, navigation,
+  and shared passId/cURL authentication with native-keyring/profile helpers.
 - Public Expiry, namespace `mycanal_expiry_tracker`: acquisition, playlist/personal
-  resume state, completion/backlog/groups, cache serialization and TTL, report
+  resume state, completion/backlog/groups, cache serialization and offline reuse, report
   statuses, Paris/French presentation, Excel and CLI.
 - Private Catalog, namespace `mycanal_catalog`: editorial sources/navigation,
   collection traversal/pagination, deduplication, memberships, SQLite and crawl state.
@@ -73,7 +88,7 @@ Only the applications depend on Core; Core imports neither application and the
 applications never import each other. Shared parsers have one implementation in
 Core. Expiry's `canal_api.py` facade retains stricter playlist URL policy and maps
 Core technical failures to the existing French report statuses. Season cache
-serialization remains in Expiry; the existing JSON format and TTL are unchanged.
+serialization remains in Expiry; the existing JSON format remains readable; cache entries have no TTL.
 
 Each project has its own metadata, environment, lockfile and offline tests. Local
 uv source overrides select the unpublished sibling Core during development; wheel
@@ -431,7 +446,7 @@ status. If the resume episode was safely matched before a later catalog failed,
 keep that label, but leave remaining count, duration and expiration blank. Preserve
 trustworthy playlist metadata and subgenre and log structured, URL-free reasons.
 
-Extend the existing `cache/details.json` and its atomic writes/24-hour TTL with
+The existing `cache/details.json` and its atomic writes store
 entries keyed `season:{playlist_content_id}:{season_id}`. Each entry contains:
 
 - `kind: "season"`, `brand_id`, `retrieved_at`;
@@ -446,25 +461,14 @@ credentials or derived totals/display strings. Cache loading validates and
 whitelists catalog fields; invalid catalogs are misses. Existing movie entries
 remain compatible. Scalar series subgenre entries no longer need a season-bound
 resource discriminator; older resource-bound entries can be refreshed when needed.
-Failed refreshes preserve prior raw entries without presenting stale data as a
-successful fresh result. Complete seasons fetched before another season fails
-remain reusable.
-
-A fresh playlist resume change immediately recalculates the backlog against cached
-catalogs, including when the resume moves into a cached later season. With usable
-playlist resume state and all needed catalogs fresh, no network request is required.
-Otherwise fetch approximately one catalog per missing/expired required season, plus
-at most one detail request to obtain current navigation. Without usable playlist
-resume state, reuse `resume_fallback` in the brand-level detail entry. It contains
-only `season_id`, `episode_id` and optional `season_number`/`episode_number` from
-detail navigation; it shares the entry's existing `retrieved_at` and 24-hour TTL.
-Usable explicit playlist state always wins. Missing/expired fallback requires detail;
-`--refresh` bypasses and replaces it. No separate TTL, fingerprint or invalidation
-rule is added. Old entries without fallback remain valid and acquire it when detail
-is needed. Fully cached catalogs plus fresh fallback need no network request; a
-catalog miss may still require fresh detail navigation because URLs are not cached.
-`--refresh` also continues to bypass catalog and scalar caches. Selectors refresh with their catalog TTL, so newly published
-seasons may require expiry or `--refresh` to become visible.
+Normal CLI runs build a new enrichment snapshot, bypassing every prior entry.
+Successful complete catalogs remain available even if another season fails;
+failed fetches produce explicit rows rather than presenting old data as fresh.
+Offline runs accept old validated catalogs and resume fallbacks without fetching
+missing information. Explicit playlist resume state always wins. A fallback stores
+only season/episode identities and optional numbers from detail navigation.
+It is regenerated during a fresh run and removed with all caches on profile change.
+Incomplete offline backlogs never produce invented or partial episode totals.
 
 Schema observations were verified with a small number of public detail/episodes
 requests. Default tests remain fully mocked. Fixtures preserve observed nesting
@@ -565,61 +569,21 @@ Logging conventions and usage rules are defined in `AGENTS.md`.
 
 ## Cache
 
-Add a simple local JSON cache to avoid unnecessarily calling all endpoints again during development.
-
-For example:
-
-    cache/
-    └── details.json
-
-`cache/details.json` is keyed by playlist `contentID` and keeps raw detail enrichment
-for 24 hours. URL, Hodor-token and feature-toggle changes alone do not invalidate
-fresh entries. Scalar detail entries can retain `season_content_id` for resource-bound data.
-For V1.2 series, scalar subgenre enrichment is brand-level; season-specific data
-lives in independently cached season catalogs. Moving the resume point, changing
-a token or changing a detail URL does not invalidate those catalogs.
-
-Entries contain `retrieved_at`, the canonical `availability_end_date` Unix timestamp
-in milliseconds (or null), and `subgenre`. Optional `availability_label` retains only
-the dated API label fallback when no timestamp exists; it is never a relative label
-or a generated display string. Optional `duration_minutes` retains the verified raw
-detail movie duration only when playlist movie duration is unavailable. No URLs,
-tokens, playlist metadata, formatted dates/durations, days remaining or derived
-statuses are stored.
-
-Missing/expired entries and `--refresh` fetch using the **current playlist URL**,
-including the existing detailV5 request handling. Successful fetches replace the
-entry; HTTP/parsing failures are not cached and leave any previous raw entry intact.
-Old presentation-only entries cannot reconstruct the canonical timestamp and are
-treated as misses. Loading drops incompatible entries and strips obsolete fields;
-the next cache save persists the cleaned format, including for unvisited entries.
-This causes a one-time refetch for old entries. Corrupt entries remain safe misses.
-
-Add a CLI option to ignore the cache:
-
-    python main.py --refresh
-
-The cache is mainly intended to avoid unnecessarily spamming the API during development and testing.
+Keep `cache/details.json` as a local development/reformatting snapshot with no
+TTL. Normal CLI execution always acquires and enriches fresh. `--from-cache`
+uses only available validated local data, never constructs an HTTP client, and
+never saves cache normalization changes. Dates/days are recalculated locally.
+The cache contains no profile partition or credential; the published acquisition
+profile is tracked separately for complete cache invalidation on profile change.
 
 ## CLI
 
-Keep V1 simple.
-
-Normal command:
-
-    python main.py
-
-Force fresh retrieval:
-
-    python main.py --refresh
-
-Optionally:
-
-    python main.py --delay 0.5
-
-to temporarily change the delay between requests.
-
-Use `argparse`.
+Use argparse. Normal command: `uv run python main.py`.
+Alternative authentication: `uv run python main.py --curl`.
+Offline generation: `uv run python main.py --from-cache`.
+Credential management: `uv run python main.py --auth set` or `--auth delete`.
+Keep `--delay`, `--data-dir`, and compatible `--refresh` for fresh runs.
+Remove `--getinfo`; reject incompatible offline options before authentication.
 
 ## Testing the API behavior
 
@@ -784,7 +748,8 @@ Document:
 9. how to run the normal mocked/unit test suite;
 10. how to explicitly run the small real-API integration test suite.
 
-The README must describe manual export and optional `--getinfo` using the user's existing browser session, without login or authentication bypass.
+Document default passId acquisition/reporting, explicit cURL and strictly offline generation,
+including shared credentials, separate profile preferences and failure preservation.
 
 ## First step
 

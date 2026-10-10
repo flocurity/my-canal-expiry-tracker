@@ -184,18 +184,13 @@ def test_vicious_token_change_reuses_fresh_enrichment(tmp_path, item, fixture_da
     assert 'b' * 32 not in path.read_text()
 
 
-@pytest.mark.parametrize('reason', ['missing', 'expired', 'refresh'])
+@pytest.mark.parametrize('reason', ['missing', 'refresh'])
 def test_fetch_uses_current_url(tmp_path, item, fixture_data, reason):
-    from datetime import datetime, timedelta, timezone
     from mycanal_expiry_tracker.canal_api import build_detail_url
     path = tmp_path / 'details.json'
     cache = DetailCache(path)
     if reason != 'missing':
         cache.put(item.content_id, DetailData())
-        if reason == 'expired':
-            cache.entries[item.content_id]['retrieved_at'] = (
-                datetime.now(timezone.utc) - timedelta(hours=25)
-            ).isoformat()
         cache.save()
     current = replace(item, detail_url=token_url('b' * 32, item.content_id),
                       supports_detail_v5=True)

@@ -67,8 +67,9 @@ class SeriesIncomplete(DetailError):
 
 
 @timeit()
-def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
-                  load_detail: Callable[[], dict], refresh: bool = False) -> SeriesBacklog:
+def enrich_series(item: PlaylistItem, client: CanalClient | None, cache: 'DetailCache',
+                  load_detail: Callable[[], dict], refresh: bool = False, *,
+                  offline: bool = False) -> SeriesBacklog:
     payload = None
     base_url = ''
     urls: dict[str, str] = {}
@@ -117,6 +118,9 @@ def enrich_series(item: PlaylistItem, client: CanalClient, cache: 'DetailCache',
         catalog = None if refresh else cache.get_season(item.content_id, requested_id)
         if catalog is not None:
             return catalog
+        if offline:
+            raise DetailError('Saison absente des données locales',
+                              'Données locales incomplètes')
         if requested_id in urls:
             url = urls[requested_id]
             if _url_season(url) != requested_id:

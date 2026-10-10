@@ -7,9 +7,8 @@ license-files = ["LICENSE"]
 description = "Export manually retrieved myCANAL playlists with availability dates to Excel"
 requires-python = ">=3.11"
 dependencies = [
-    "mycanal-hodor-core>=0.1,<0.2",
+    "mycanal-hodor-core[interactive]>=0.1,<0.2",
     "pandas>=3.0.6",
-    "prompt-toolkit>=3.0.53",
     "requests>=2.34.2",
     "structlog>=26.1.0",
     "xlsxwriter>=3.2.9",

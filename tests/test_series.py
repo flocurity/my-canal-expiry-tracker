@@ -125,12 +125,12 @@ def test_later_seasons_and_no_per_episode_requests(tmp_path, series, client, fix
     assert process_items([series], client, DetailCache(path))[0] == result
     client.fetch.assert_not_called()
     client.fetch_episodes.assert_not_called()
-    # One expired catalog must not trigger another request for the other two.
+    # Old catalogs remain usable without any TTL-driven request.
     cache = DetailCache(path)
     cache.entries['season:squirtle_brand:squirtle_s5']['retrieved_at'] = (
         datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
     assert process_items([series], client, cache)[0] == result
-    client.fetch_episodes.assert_called_once_with(episodes_url(5), series.content_id)
+    client.fetch_episodes.assert_not_called()
     client.reset_mock()
     moved = replace(series, season_id='squirtle_s5', episode_id='squirtle_s5e2',
                     detail_url=series.detail_url.replace('detailPage', 'detailSeason'))
@@ -345,7 +345,7 @@ def test_cached_detail_resume_fallback_request_counts(tmp_path, series, client):
     client.fetch_episodes.assert_not_called()
 
 
-def test_fallback_uses_existing_detail_ttl(tmp_path, series, client):
+def test_old_fallback_remains_available_without_ttl(tmp_path, series, client):
     path = tmp_path / 'details.json'
     series = replace(series, season_id='', episode_id='')
     process_items([series], client, DetailCache(path))
@@ -354,8 +354,40 @@ def test_fallback_uses_existing_detail_ttl(tmp_path, series, client):
         datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
     client.reset_mock()
     process_items([series], client, cache)
-    client.fetch.assert_called_once()
+    client.fetch.assert_not_called()
     client.fetch_episodes.assert_not_called()
+
+
+def test_offline_series_uses_old_catalogs_without_network(tmp_path, series, client):
+    path = tmp_path / 'details.json'
+    expected = process_items([series], client, DetailCache(path))
+    cache = DetailCache(path)
+    for entry in cache.entries.values():
+        entry['retrieved_at'] = '2000-01-01T00:00:00+00:00'
+    cache.dirty = True
+    cache.save()
+    before = path.read_bytes()
+    client.reset_mock()
+    assert process_items([series], None, DetailCache(path), offline=True) == expected
+    client.fetch.assert_not_called()
+    client.fetch_episodes.assert_not_called()
+    assert path.read_bytes() == before
+
+
+def test_offline_missing_later_season_keeps_resume_but_no_partial_totals(tmp_path, series, client, fixture_data):
+    path = tmp_path / 'details.json'
+    template = fixture_data('episodes_series.json')
+    client.fetch_episodes.side_effect = lambda url, _: season_response(
+        template, int(parse_qs(urlsplit(url).query)['seasonID'][0].removeprefix('squirtle_s')),
+        ['21 min'] * 11, [3, 5])
+    process_items([series], client, DetailCache(path))
+    cache = DetailCache(path)
+    del cache.entries['season:squirtle_brand:squirtle_s5']
+    result = process_items([series], None, cache, offline=True)[0]
+    assert result.status == 'Données locales incomplètes'
+    assert result.resume_episode
+    assert result.episodes_remaining is None
+    assert result.duration_minutes is None
 
 
 @pytest.mark.parametrize('missing_duration', [False, True])

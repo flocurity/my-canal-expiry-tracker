@@ -52,7 +52,7 @@ def test_invalid_input_no_requests_or_files(cli, monkeypatch, command, reason):
     before = {p.name: p.read_bytes() for p in directory.iterdir()}
     monkeypatch.setattr(main, 'read_curl', lambda: command)
     with capture_logs() as logs:
-        assert main.main(['--getinfo']) == 1
+        assert main.main(['--curl']) == 1
     factory.assert_not_called()
     assert before == {p.name: p.read_bytes() for p in directory.iterdir()}
     assert reason in str(logs)
@@ -66,7 +66,7 @@ def test_complete_acquisition_raw_files_and_loader(cli, page_count):
     pages = [raw_page(n < page_count, f'opaque+/={n}') for n in range(1, page_count + 1)]
     api.fetch_playlist_page.side_effect = pages
     with capture_logs() as logs:
-        assert main.main(['--getinfo']) == 0
+        assert main.main(['--curl']) == 0
     assert api.fetch_playlist_page.call_count == page_count
     for n, call in enumerate(api.fetch_playlist_page.call_args_list):
         query = parse_qs(urlsplit(call.args[0]).query)
@@ -79,8 +79,8 @@ def test_complete_acquisition_raw_files_and_loader(cli, page_count):
     assert (directory / 'old.json.bak').read_bytes() == b'{"contents":[]}'
     assert (directory / 'history.json.bak').read_bytes() == b'untouched'
     assert load_playlist(directory) == []
-    assert not (directory.parent / 'cache').exists()
-    assert not (directory.parent / 'output').exists()
+    assert (directory.parent / 'cache' / 'details.json').exists()
+    assert (directory.parent / 'output' / 'ma-liste-canal.xlsx').exists()
     assert all(secret not in str(logs) for secret in (AUTH, PROFILE, TOKEN))
     assert all(secret.encode() not in p.read_bytes() for secret in (AUTH, PROFILE, TOKEN)
                for p in active)
@@ -112,7 +112,7 @@ def test_failed_acquisition_preserves_old_export(cli, responses):
     directory, api, _ = cli
     api.fetch_playlist_page.side_effect = responses
     before = {p.name: p.read_bytes() for p in directory.iterdir()}
-    assert main.main(['--getinfo']) == 1
+    assert main.main(['--curl']) == 1
     assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
     assert api.fetch_playlist_page.call_count == len(responses)
 
@@ -125,7 +125,7 @@ def test_echoed_authentication_refused(cli, echo):
     payload.update(echo)
     api.fetch_playlist_page.return_value = json.dumps(payload).encode()
     with capture_logs() as logs:
-        assert main.main(['--getinfo']) == 1
+        assert main.main(['--curl']) == 1
     assert AUTH not in str(logs) and PROFILE not in str(logs)
     assert [p.name for p in directory.iterdir()] == ['old.json']
 
@@ -134,7 +134,7 @@ def test_backup_collision_preserves_both_files(cli):
     directory, api, _ = cli
     (directory / 'old.json.bak').write_bytes(b'history')
     api.fetch_playlist_page.return_value = raw_page()
-    assert main.main(['--getinfo']) == 1
+    assert main.main(['--curl']) == 1
     assert (directory / 'old.json').read_bytes() == b'{"contents":[]}'
     assert (directory / 'old.json.bak').read_bytes() == b'history'
     assert len(list(directory.iterdir())) == 2
@@ -154,6 +154,100 @@ def test_publish_failure_rolls_back(tmp_path, monkeypatch):
     with pytest.raises(AcquisitionError):
         publish_pages([raw_page(), raw_page()], tmp_path)
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {'old.json': b'old'}
+
+
+@pytest.mark.parametrize('status', [401, 403])
+def test_pass_id_acquisition_recovers_once_with_current_headers(status):
+    context = parse_curl(CURL)
+    authentication = Mock(headers=context.headers, secrets=[AUTH, PROFILE])
+
+    def renew(**kwargs):
+        authentication.headers = {'tokenPass': 'NEW_FAKE_TOKEN', 'xx-profile-id': PROFILE}
+        authentication.secrets.append('NEW_FAKE_TOKEN')
+
+    authentication.ensure.side_effect = renew
+    client = Mock()
+    client.fetch_playlist_page.side_effect = [DetailError('HTTP', status_code=status),
+                                             raw_page(True, 'next'), raw_page()]
+    assert len(acquire_pages(context, client, authentication)) == 2
+    authentication.ensure.assert_called_once_with(force=True)
+    assert client.fetch_playlist_page.call_args_list[1].args[1]['tokenPass'] == 'NEW_FAKE_TOKEN'
+    assert client.fetch_playlist_page.call_args_list[2].args[1]['tokenPass'] == 'NEW_FAKE_TOKEN'
+    assert context.token_pass == AUTH
+
+
+def test_acquisition_recovery_budget_applies_to_entire_pagination():
+    context = parse_curl(CURL)
+    authentication = Mock(headers=context.headers, secrets=[AUTH])
+    client = Mock()
+    client.fetch_playlist_page.side_effect = [DetailError('HTTP', status_code=401),
+                                             raw_page(True, 'next'),
+                                             DetailError('HTTP', status_code=403)]
+    with pytest.raises(DetailError):
+        acquire_pages(context, client, authentication)
+    authentication.ensure.assert_called_once_with(force=True)
+    assert client.fetch_playlist_page.call_count == 3
+
+
+def test_repeated_authentication_failure_is_not_retried_again():
+    context = parse_curl(CURL)
+    authentication = Mock(headers=context.headers, secrets=[AUTH])
+    client = Mock()
+    client.fetch_playlist_page.side_effect = [DetailError('HTTP', status_code=401)] * 2
+    with pytest.raises(DetailError):
+        acquire_pages(context, client, authentication)
+    authentication.ensure.assert_called_once_with(force=True)
+    assert client.fetch_playlist_page.call_count == 2
+
+
+@pytest.mark.parametrize('secret', ['FAKE_PASS_ID', AUTH, 'NEW_FAKE_TOKEN'])
+def test_acquisition_refuses_all_authentication_secret_history(secret):
+    context = parse_curl(CURL)
+    authentication = Mock(headers=context.headers,
+                          secrets=['FAKE_PASS_ID', AUTH, 'NEW_FAKE_TOKEN'])
+    client = Mock()
+    client.fetch_playlist_page.return_value = json.dumps({
+        'contents': [], 'paging': {'hasNextPage': False}, 'echo': secret,
+    }).encode()
+    with pytest.raises(AcquisitionError, match='authentication data'):
+        acquire_pages(context, client, authentication)
+    authentication.ensure.assert_not_called()
+
+
+def test_publication_rolls_back_profile_and_whole_cache(tmp_path, monkeypatch):
+    import mycanal_expiry_tracker.acquisition as acquisition
+    directory = tmp_path / 'input'
+    directory.mkdir()
+    (directory / 'old.json').write_bytes(b'old')
+    metadata = directory / '.acquisition-profile'
+    metadata.write_text('{"profileId":"old"}')
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    (cache / 'details.json').write_bytes(b'old cache')
+    move = acquisition._move_without_overwrite
+
+    def fail_second(source, destination):
+        if destination.name.endswith('.page2.json'):
+            raise OSError('synthetic failure')
+        move(source, destination)
+
+    monkeypatch.setattr(acquisition, '_move_without_overwrite', fail_second)
+    with pytest.raises(AcquisitionError):
+        publish_pages([raw_page(), raw_page()], directory,
+                      profile_id='new', cache_directory=cache)
+    assert (directory / 'old.json').read_bytes() == b'old'
+    assert metadata.read_text() == '{"profileId":"old"}'
+    assert (cache / 'details.json').read_bytes() == b'old cache'
+
+
+def test_successful_profile_change_removes_entire_cache(tmp_path):
+    directory = tmp_path / 'input'
+    cache = tmp_path / 'cache'
+    (cache / 'nested').mkdir(parents=True)
+    (cache / 'nested' / 'old-data').write_bytes(b'private old data')
+    publish_pages([raw_page()], directory, profile_id='new', cache_directory=cache)
+    assert not cache.exists()
+    assert json.loads((directory / '.acquisition-profile').read_text()) == {'profileId': 'new'}
 
 
 def test_shared_transport_retries_without_sensitive_logging(monkeypatch):

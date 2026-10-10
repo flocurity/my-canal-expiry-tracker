@@ -1,7 +1,7 @@
 # myCANAL Expiry Tracker
 
-A small personal Python tool that reads exported myCANAL playlists,
-retrieves public content details, and regenerates a sortable Excel availability
+A small personal Python tool that acquires your myCANAL playlist,
+retrieves fresh public content details, and regenerates a sortable Excel availability
 report. Requires Python 3.11 or newer and `uv`.
 
 ## Setup and usage
@@ -11,19 +11,32 @@ Install `uv` if necessary (on macOS, `brew install uv`; other platforms:
 
 ```sh
 uv sync
+uv run python main.py --auth set
 uv run python main.py
 ```
 
-Place all playlist page responses in `input/` as `.json` files. These files are
-**retrieved from your own myCANAL account**, manually or with `--getinfo`.
-See [**Retrieving the playlist inputs**](#retrieving-the-playlist-inputs)
-The program never implements login or bypasses playlist authentication. Personal exports, cache files, and generated workbooks
-are ignored by Git; `uv.lock` is intended to be versioned.
+Normal runs use the shared Core passId authentication, acquire all playlist pages,
+fetch fresh enrichment, and generate Excel. The secure keyring entry is
+`mycanal-catalog` / `passId`, shared with Catalog; `--auth set` replaces it and
+`--auth delete` removes it for both applications. Only supported native secure
+keyrings are accepted. There is no silent cURL or cache fallback.
 
-All JSON files must contain a top-level object with a `contents` array. Minified
-JSON is accepted. Every file is validated before any API calls or output changes;
-invalid files produce a clear error and exit code 1. Normal report generation never rewrites inputs.
-An empty array is valid; no JSON files is an error.
+With passId, the profile is explicitly selected/confirmed on every launch. Expiry
+remembers only its ID in the OS config directory under
+`mycanal-expiry-tracker/profile.json`, independently of Catalog. A missing profile
+has no selection default; its obsolete preference is retired after successful
+replacement authentication. Network/authentication failures preserve the preference.
+
+`--curl` explicitly uses a browser request instead. `--from-cache` generates
+strictly offline, without authentication or HTTP, using the last local playlist
+and enrichment. It accepts old data and marks unavailable information as
+`Données locales incomplètes`. It cannot be combined with `--curl` or `--refresh`.
+`--getinfo` has been removed; acquisition and reporting now form one normal run.
+Manual JSON exports in `input/` remain readable with `--from-cache`.
+Personal exports, cache files, and workbooks are ignored by Git.
+
+All JSON files must contain a top-level object with a `contents` array. An empty
+array is valid; no JSON files is an error. Offline generation never rewrites inputs.
 
 Pages are read in filename order. Usable items need a nonempty `onClick.URLPage`.
 The first usable occurrence of each `contentID` wins. Items without an ID are
@@ -34,14 +47,14 @@ without detail URLs are skipped with a warning.
 
 ## Retrieving the playlist inputs
 
-The tracker does not log into myCANAL itself. You can acquire the playlist using
-your existing browser session:
+The default passId bootstrap is implemented in Core. For the explicit browser
+alternative:
 
 1. Log into myCANAL normally and stay on the [main page](https://www.canalplus.com/)
 2. In Firefox DevTools → **Network**, find the authenticated Hodor playlist request
    (the endpoint `/api/v2/mycanal/me/<token>/lists/playlist`). Reload if necessary.
 3. Choose **Copy as cURL**.
-4. Run `uv run python main.py --getinfo`.
+4. Run `uv run python main.py --curl`.
 5. Paste the complete request into the multiline prompt, then press **Esc**, then **Enter**.
 
 **The copied request contains sensitive authentication data. Do not share, commit
@@ -51,14 +64,22 @@ headers, and never saves or logs the request or those headers. API-returned
 tokenized URLs remain in the raw export; keep these private files out of Git.
 
 Acquisition uses existing pacing/retries and follows server cursors for at most
-five pages / 500 entries. Browser query parameters are preserved, with `get=100`,
+five pages / 500 entries. passId uses the bootstrap context without browser-only
+query options. With cURL, browser query parameters are preserved, with `get=100`,
 `maxContentRemaining=500` and server-issued `after` cursors controlled by acquisition. It saves each original decompressed JSON body unchanged
 as `input/YYYY-MM-DD.HH-MM.json`, then `.page2.json`, etc., using one Paris
-timestamp. It does not generate a workbook; run `uv run python main.py` afterward.
+timestamp. It then enriches the playlist and generates the workbook.
 
 Only a complete validated acquisition archives active `*.json` to `.json.bak`.
 An existing backup collision aborts without overwriting it; move that backup
 yourself before retrying. Fetch/validation failures leave the old export untouched.
+The last published profile ID is tracked in `input/.acquisition-profile`, outside
+of the enrichment cache. A changed or unknown profile removes the entire `cache/`
+directory only as part of successful publication. This metadata and cache removal
+participate in publication rollback. Acquisition failure preserves the previous
+playlist, cache and workbook. There is no periodic token rotation during pagination;
+one recovery after HTTP 401/403 is allowed across the whole passId acquisition.
+cURL credentials cannot be renewed automatically.
 Publication stages files and rolls back ordinary filesystem failures; it is not
 a crash-atomic multi-file transaction. Run one exporter at a time. Responses
 echoing authentication data are refused rather than redacted.
@@ -121,39 +142,27 @@ failures remain in the workbook as `Erreur HTTP` or `Erreur parsing`, and the
 remaining items are processed. Exit code 0 means the report was written, even
 if some rows failed; the final structured log includes status counts.
 
-`cache/details.json` is keyed by playlist `contentID` and keeps raw detail enrichment
-for 24 hours. URL, Hodor-token and feature-toggle changes alone do not invalidate
-fresh entries. Series subgenre is cached by brand identity; episode catalogs are cached separately
-per stable brand/season identity in the same file. Moving the resume point or
-changing a detail URL does not invalidate fresh catalogs.
+`cache/details.json` holds raw detail enrichment and validated season catalogs,
+keyed by content and season identities, with no profile field and **no TTL**.
+Normal runs always rebuild fresh enrichment, including resume fallbacks; the cache
+is primarily for offline development and reformatting. `--refresh` remains accepted
+for compatibility but normal runs are already fresh.
 
-Entries contain `retrieved_at`, the canonical `availability_end_date` Unix timestamp
-in milliseconds (or null), and `subgenre`. Optional `availability_label` retains only
-the dated API label fallback when no timestamp exists; it is never a relative label
-or a generated display string. Optional `duration_minutes` retains the verified raw
-detail movie duration only when playlist movie duration is unavailable. No URLs,
-tokens, playlist metadata, formatted dates/durations, days remaining or derived
-statuses are stored.
-
-Missing/expired entries and `--refresh` fetch using the **current playlist URL**,
-including the existing detailV5 request handling. Successful fetches replace the
-entry; HTTP/parsing failures are not cached and leave any previous raw entry intact.
-Old presentation-only entries cannot reconstruct the canonical timestamp and are
-treated as misses. Loading drops incompatible entries and strips obsolete fields;
-the next cache save persists the cleaned format, including for unvisited entries.
-This causes a one-time refetch for old entries. Corrupt entries remain safe misses.
-Cache read/write failures are logged and do not prevent reporting. Cache writes
-use a temporary file and atomic replacement. Run one exporter at a time.
+Entries retain observation timestamps, raw availability, subgenre, durations and
+validated season/episode metadata. No credential, API URL or computed report totals
+are stored. Invalid/legacy entries are misses. Cache writes use a temporary file
+and atomic replacement; offline generation does not rewrite the cache.
 
 ```sh
-uv run python main.py --refresh
+uv run python main.py --from-cache
 ```
 
-`--refresh` ignores existing entries and updates the cache after successful
-retrievals. The shared transport default lives in Core; cache lifetime lives in
-`src/mycanal_expiry_tracker/cache.py`. `uv run python main.py` retains checkout-relative
-data paths. The installed `mycanal-expiry-tracker` command uses the current working
-directory, or `--data-dir DIRECTORY`, for `input`, `cache` and `output`.
+This mode uses every available validated entry regardless of age, never requests
+missing details or seasons, and produces explicit partial rows when necessary.
+A partial series does not invent episode totals. Expiration/day presentation is
+recalculated from the saved raw timestamps. The installed `mycanal-expiry-tracker`
+command uses the current directory or `--data-dir DIRECTORY`; `main.py` retains
+checkout-relative data paths. Run one exporter at a time.
 
 ## Excel output
 
@@ -208,13 +217,11 @@ group's sum. `Catégorie` describes the represented seasons (for example `Saison
 same date. Groups use existing catalogs without extra requests or cached display
 state; incomplete backlogs still produce no partial totals.
 
-Catalogs use public `/episodes` URLs and the existing paced HTTP client, with about
-one request per missing/stale required season and no per-episode requests. Fresh
-catalogs are reusable after token or resume changes. One detail request may be needed
-for navigation or missing/expired fallback resume state. Canonical fallback season/
-episode IDs and numbers share the detail cache's existing TTL; explicit playlist
-state takes priority, and `--refresh` replaces the fallback. Fully cached runs reuse
-it without another detail request. No authenticated progression endpoint is used. URLs, progress and derived backlog values are never cached. Incomplete paging,
+Catalogs use public `/episodes` URLs and the existing paced HTTP client, with
+fresh requests for each necessary season in normal mode and no per-episode
+requests. Offline mode reuses validated catalogs and saved resume fallbacks
+without any TTL; explicit playlist state always takes priority.
+No authenticated progression endpoint is used. URLs, progress and derived backlog values are never cached. Incomplete paging,
 missing navigation or an unmatched resume point produces blank uncertain values and
 `Série incomplète`; HTTP errors retain their existing status. A safely matched resume
 label is retained if a later-season fetch fails. See SPEC.md for exact cache and

@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from mycanal_hodor_core.diagnostics import debug_failure
@@ -16,14 +16,12 @@ from mycanal_hodor_core.episodes import SeasonCatalog, identifier, positive_numb
 from .catalog_cache import catalog_from_cache, catalog_to_cache
 
 log = get_logger(__name__)
-CACHE_LIFETIME = timedelta(hours=24)
 
 
 class DetailCache:
     @timeit()
-    def __init__(self, path: Path, lifetime: timedelta = CACHE_LIFETIME) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self.lifetime = lifetime
         self.entries: dict = {}
         self.dirty = False
         try:
@@ -104,10 +102,8 @@ class DetailCache:
         if not content_id or entry is None:
             return None
         try:
-            retrieved = datetime.fromisoformat(entry['retrieved_at'])
-            age = datetime.now(timezone.utc) - retrieved
-            if (not timedelta(0) <= age < self.lifetime
-                    or entry.get('season_content_id', '') != season_content_id):
+            datetime.fromisoformat(entry['retrieved_at'])
+            if entry.get('season_content_id', '') != season_content_id:
                 return None
             return DetailData(
                 availability_end_date=entry['availability_end_date'],
@@ -140,9 +136,7 @@ class DetailCache:
         if entry is None or entry.get('kind') != 'season' or entry['brand_id'] != brand_id:
             return None
         try:
-            age = datetime.now(timezone.utc) - datetime.fromisoformat(entry['retrieved_at'])
-            if not timedelta(0) <= age < self.lifetime:
-                return None
+            datetime.fromisoformat(entry['retrieved_at'])
             catalog = catalog_from_cache(entry['catalog'])
             return catalog if catalog.season.content_id == season_id else None
         except (ValueError, TypeError):
