@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from mycanal_expiry_tracker.playlist import PlaylistError, load_playlist
+from mycanal_expiry_tracker.playlist import PlaylistError, parse_playlist
 
 
 def test_load_merge_deduplicate_optional_fields(tmp_path, fixture_data):
@@ -13,7 +13,7 @@ def test_load_merge_deduplicate_optional_fields(tmp_path, fixture_data):
     first.write_text(json.dumps(data), encoding='utf-8')
     (tmp_path / 'b.json').write_text(json.dumps(data), encoding='utf-8')
     before = first.read_bytes()
-    items = load_playlist(tmp_path)
+    items = parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])
     assert len(items) == 2
     assert items[0].content_id == 'fiction_50001'
     assert items[0].subtitle == 'Film Science-fiction'
@@ -28,26 +28,17 @@ def test_load_merge_deduplicate_optional_fields(tmp_path, fixture_data):
 def test_invalid_file_fails_even_with_valid_page(tmp_path, invalid):
     (tmp_path / 'good.json').write_text('{"contents": []}')
     (tmp_path / 'bad.json').write_text(invalid)
-    with pytest.raises(PlaylistError, match='bad.json'):
-        load_playlist(tmp_path)
+    with pytest.raises(PlaylistError, match='Invalid playlist|Expected an object'):
+        parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])
 
 
-def test_reports_all_invalid_files(tmp_path):
-    (tmp_path / 'a.json').write_text('no')
-    (tmp_path / 'b.json').write_text('no')
-    with pytest.raises(PlaylistError) as error:
-        load_playlist(tmp_path)
-    assert 'a.json' in str(error.value) and 'b.json' in str(error.value)
 
 
-def test_missing_input(tmp_path):
-    with pytest.raises(PlaylistError, match='No .json'):
-        load_playlist(tmp_path)
 
 
 def test_empty_playlist(tmp_path):
     (tmp_path / 'a.json').write_text('{"contents": []}')
-    assert load_playlist(tmp_path) == []
+    assert parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))]) == []
 
 
 def test_skip_unusable_entries_keep_missing_ids(tmp_path, fixture_data):
@@ -55,7 +46,7 @@ def test_skip_unusable_entries_keep_missing_ids(tmp_path, fixture_data):
     del valid['contentID']
     values = [None, [], {}, {'onClick': {'URLPage': 42}}, valid, valid]
     (tmp_path / 'a.json').write_text(json.dumps({'contents': values}))
-    items = load_playlist(tmp_path)
+    items = parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])
     assert len(items) == 2
     assert all(item.content_id == '' for item in items)
 
@@ -63,14 +54,14 @@ def test_skip_unusable_entries_keep_missing_ids(tmp_path, fixture_data):
 def test_web_url(item):
     assert item.web_url == 'https://www.canalplus.com' + item.path
     for path in ('//evil.example/x', '/\\evil.example', 'javascript:alert(1)', ''):
-        assert replace(item, path=path).web_url == item.detail_url
+        assert replace(item, path=path).web_url == ''
     assert replace(item, path='', detail_url='javascript:alert(1)').web_url == ''
 
 
 def test_detail_v5_declaration_preserves_source_url(tmp_path, fixture_data):
     data = fixture_data('playlist.json')
     (tmp_path / 'page.json').write_text(json.dumps(data))
-    movie, season = load_playlist(tmp_path)
+    movie, season = parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])
     assert movie.supports_detail_v5 is True
     assert season.supports_detail_v5 is True
     assert season.detail_url == data['contents'][1]['onClick']['URLPage']
@@ -94,7 +85,7 @@ def test_invalid_or_unsupported_parameters(tmp_path, fixture_data, parameters):
     raw = data['contents'][0]
     raw['onClick']['parameters'] = parameters
     (tmp_path / 'page.json').write_text(json.dumps({'contents': [raw]}))
-    item = load_playlist(tmp_path)[0]
+    item = parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])[0]
     assert item.supports_detail_v5 is False
     assert item.detail_url == raw['onClick']['URLPage']
 
@@ -106,4 +97,4 @@ def test_playlist_duration_milliseconds(tmp_path, fixture_data, duration, expect
     data = fixture_data('playlist.json')
     data['contents'][0]['duration'] = duration
     (tmp_path / 'page.json').write_text(json.dumps(data))
-    assert load_playlist(tmp_path)[0].duration_ms == expected
+    assert parse_playlist([p.read_bytes() for p in sorted(tmp_path.glob('*.json'))])[0].duration_ms == expected

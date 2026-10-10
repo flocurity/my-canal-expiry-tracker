@@ -7,7 +7,7 @@ import pytest
 
 from mycanal_expiry_tracker.canal_api import CanalClient, build_detail_url
 from mycanal_expiry_tracker.expiration import extract_expiration
-from mycanal_expiry_tracker.playlist import load_playlist
+from mycanal_expiry_tracker.playlist import parse_playlist
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def playlist():
     if not list((ROOT / 'input').glob('*.json')):
         pytest.skip('No manually exported playlist JSON files available in input/')
-    return load_playlist(ROOT / 'input')
+    return parse_playlist([p.read_bytes() for p in sorted((ROOT / 'input').glob('*.json'))])
 
 
 @pytest.fixture(scope='module')

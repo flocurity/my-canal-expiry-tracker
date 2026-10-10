@@ -1,23 +1,20 @@
 """Personal backlog selection using the shared Hodor episode catalog."""
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 from mycanal_hodor_core.logging import get_logger
 from mycanal_hodor_core.timing import timeit
 from mycanal_hodor_core.episodes import (
-    Season, Episode, SeasonCatalog, parse_catalog, parse_duration_label,
-    positive_number, identifier, extract_navigation as _navigation,
+    Episode, SeasonCatalog, parse_catalog, parse_duration_label,
+    identifier, extract_navigation as _navigation,
     url_season as _url_season, for_season as _for_season,
     legacy_selector as _legacy_selector,
 )
 from mycanal_hodor_core.http import HodorError
 from .canal_api import CanalClient, DetailError, _report_error
-from .detail import ResumeFallback
 from .playlist import PlaylistItem
-if TYPE_CHECKING:
-    from .cache import DetailCache
 log = get_logger(__name__)
+
 
 def is_synthetic_episode_number(episode: Episode) -> bool:
     # The absent-number fallback is strictly positive; explicit zero is editorial.
@@ -67,26 +64,19 @@ class SeriesIncomplete(DetailError):
 
 
 @timeit()
-def enrich_series(item: PlaylistItem, client: CanalClient | None, cache: 'DetailCache',
-                  load_detail: Callable[[], dict], refresh: bool = False, *,
-                  offline: bool = False) -> SeriesBacklog:
+def enrich_series(item: PlaylistItem, client: CanalClient,
+                  load_detail: Callable[[], dict], *,
+                  secrets: tuple[str, ...] = ()) -> SeriesBacklog:
     payload = None
     base_url = ''
     urls: dict[str, str] = {}
-    
+
     def navigation() -> tuple[str, str, int | None, int | None]:
         nonlocal payload, base_url
         if payload is None:
             payload = load_detail()
         result = _navigation(payload)
         base_url, episode_id, season_number, episode_number = result
-        season_id = _url_season(base_url)
-        if season_id and (episode_id or episode_number is not None):
-            detail = cache.get(item.content_id)
-            if detail is not None:
-                cache.put(item.content_id, replace(detail, resume_fallback=ResumeFallback(
-                    season_id, episode_id, season_number, episode_number,
-                )))
         return result
 
     # Do not let a conflicting detail action replace even an unmatchable explicit
@@ -95,32 +85,22 @@ def enrich_series(item: PlaylistItem, client: CanalClient | None, cache: 'Detail
     episode_id = identifier(item.episode_id)
     season_number, episode_number = item.season_number, item.episode_number
     if not season_id or not (episode_id or episode_number is not None):
-        detail = None if refresh else cache.get(item.content_id)
-        fallback = detail.resume_fallback if detail is not None else None
-        if fallback is None:
-            url, fallback_id, fallback_season, fallback_episode = navigation()
-            fallback = ResumeFallback(_url_season(url), fallback_id,
-                                      fallback_season, fallback_episode)
-        if season_id and season_id != fallback.season_id:
+        url, fallback_id, fallback_season, fallback_episode = navigation()
+        fallback_season_id = _url_season(url)
+        if season_id and season_id != fallback_season_id:
             raise ValueError('Incomplete playlist resume point conflicts with detail')
-        if episode_id and fallback.episode_id and episode_id != fallback.episode_id:
+        if episode_id and fallback_id and episode_id != fallback_id:
             raise ValueError('Incomplete playlist resume point conflicts with detail')
-        season_id = season_id or fallback.season_id
-        episode_id = episode_id or fallback.episode_id
+        season_id = season_id or fallback_season_id
+        episode_id = episode_id or fallback_id
         if season_number is None:
-            season_number = fallback.season_number
+            season_number = fallback_season
         if episode_number is None:
-            episode_number = fallback.episode_number
+            episode_number = fallback_episode
     if not season_id or not (episode_id or episode_number is not None):
         raise ValueError('Missing usable resume season/episode')
 
     def catalog_for(requested_id: str) -> SeasonCatalog:
-        catalog = None if refresh else cache.get_season(item.content_id, requested_id)
-        if catalog is not None:
-            return catalog
-        if offline:
-            raise DetailError('Saison absente des données locales',
-                              'Données locales incomplètes')
         if requested_id in urls:
             url = urls[requested_id]
             if _url_season(url) != requested_id:
@@ -130,9 +110,9 @@ def enrich_series(item: PlaylistItem, client: CanalClient | None, cache: 'Detail
                 navigation()
             url = _for_season(base_url, requested_id)
         response = client.fetch_episodes(url, item.content_id)
-        catalog, discovered = parse_catalog(response, requested_id, _legacy_selector(payload))
+        catalog, discovered = parse_catalog(response, requested_id, _legacy_selector(payload),
+                                             diagnostic_secrets=secrets)
         urls.update(discovered)
-        cache.put_season(item.content_id, catalog)
         return catalog
 
     current = catalog_for(season_id)
@@ -151,8 +131,6 @@ def enrich_series(item: PlaylistItem, client: CanalClient | None, cache: 'Detail
     remaining = [(current.season.number, episode) for episode in current.episodes[start:]]
     resume_label = _episode_label(current.season.number, resume)
     try:
-        # The selector is catalog data, not user state. Cached selectors can therefore
-        # discover later seasons without fetching detail again on a fully cached run.
         pending = {season.content_id: season for season in current.seasons
                    if season.number > current.season.number}
         known = {season.content_id: season for season in current.seasons}

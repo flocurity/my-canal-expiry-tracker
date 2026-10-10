@@ -1,13 +1,8 @@
-"""Acquire playlist pages using transient browser-supplied request context."""
+"""Acquire complete playlist pages in memory using Core authentication."""
 
 import json
-import os
 import re
-from datetime import datetime
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from urllib.parse import parse_qsl, urlencode, urlsplit
-from zoneinfo import ZoneInfo
+from urllib.parse import urlencode, urlsplit
 
 from mycanal_hodor_core.bootstrap import (
     BootstrapError, HodorRuntimeContext, parse_curl as parse_browser_curl, read_curl,
@@ -40,33 +35,6 @@ def parse_curl(command: str) -> RequestContext:
                         urlsplit(context.request_url).path):
         raise AcquisitionError('Expected the Mes Vidéos Hodor playlist URL and a valid path token')
     return context
-
-
-def contains_authentication(value: object, context: RequestContext,
-                            secrets: tuple[str, ...] = ()) -> bool:
-    """Raw bodies cannot be redacted, so refuse an echoed authentication context."""
-    if isinstance(value, dict):
-        return any(
-            key.casefold() in ('passid', 'passtoken', 'tokenpass', 'xx-profile-id')
-            or contains_authentication(child, context, secrets)
-            for key, child in value.items()
-        )
-    if isinstance(value, list):
-        return any(contains_authentication(child, context, secrets) for child in value)
-    return isinstance(value, str) and (
-        any(secret in value for secret in (*secrets, context.token_pass, context.profile_id) if secret)
-    )
-
-
-def _move_without_overwrite(source: Path, destination: Path) -> None:
-    # Both paths are on the input filesystem. Unlike rename(), link() refuses
-    # an existing destination even if it appeared after the preflight check.
-    os.link(source, destination)
-    try:
-        source.unlink()
-    except OSError:
-        destination.unlink()
-        raise
 
 
 def acquire_pages(context: RequestContext, client: CanalClient,
@@ -106,13 +74,6 @@ def acquire_pages(context: RequestContext, client: CanalClient,
             payload = json.loads(raw, object_pairs_hook=checked_object)
         except (ValueError, UnicodeError, RecursionError):
             raise AcquisitionError('Response is not valid JSON') from None
-        try:
-            secrets = tuple(authentication.secrets) if authentication is not None else ()
-            sensitive = contains_authentication(payload, context, secrets)
-        except RecursionError:
-            raise AcquisitionError('Unexpected JSON nesting') from None
-        if sensitive:
-            raise AcquisitionError('Response contains authentication data; export refused')
         if not isinstance(payload, dict) or not isinstance(payload.get('contents'), list):
             raise AcquisitionError('Unexpected playlist response')
         paging = payload.get('paging')
@@ -136,72 +97,3 @@ def acquire_pages(context: RequestContext, client: CanalClient,
             raise AcquisitionError('Pagination cursor loop')
         cursors.add(cursor)
     raise AcquisitionError('Incomplete acquisition: more than five pages indicated')
-
-
-def publish_pages(pages: list[bytes], directory: Path,
-                  exported_at: datetime | None = None, *,
-                  profile_id: str | None = None,
-                  cache_directory: Path | None = None) -> list[Path]:
-    """Stage fully acquired pages before archiving; roll back ordinary I/O failures."""
-    stamp = (exported_at or datetime.now(ZoneInfo('Europe/Paris'))).astimezone(
-        ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d.%H-%M')
-    destinations = [directory / (stamp + (f'.page{n}' if n > 1 else '') + '.json')
-                    for n in range(1, len(pages) + 1)]
-    old = sorted(directory.glob('*.json'))
-    backups = [(path, path.with_name(path.name + '.bak')) for path in old]
-    if any(backup.exists() or backup.is_symlink() for _, backup in backups):
-        raise AcquisitionError('Backup already exists; move it before retrying')
-    if any(path.is_symlink() or not path.is_file() for path in old):
-        raise AcquisitionError('Active input must be a regular file')
-    if any(path.exists() and path not in old for path in destinations):
-        raise AcquisitionError('Export filename collision')
-    profile_file = directory / '.acquisition-profile'
-    if profile_file.is_symlink() or (profile_file.exists() and not profile_file.is_file()):
-        raise AcquisitionError('Acquisition profile metadata must be a regular file')
-    if cache_directory is not None and (cache_directory.is_symlink()
-                                       or (cache_directory.exists() and not cache_directory.is_dir())):
-        raise AcquisitionError('Cache must be a regular directory')
-    archived, published = [], []
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-        with TemporaryDirectory(prefix='.playlist-', dir=directory) as temporary:
-            staged = []
-            for number, raw in enumerate(pages):
-                path = Path(temporary) / str(number)
-                path.touch(mode=0o600)
-                path.write_bytes(raw)
-                staged.append(path)
-            previous_profile = Path(temporary) / 'previous-profile'
-            previous_cache = Path(temporary) / 'previous-cache'
-            staged_profile = Path(temporary) / 'profile'
-            if profile_id is not None:
-                staged_profile.write_text(json.dumps({'profileId': profile_id}))
-            try:
-                # Metadata and cache invalidation participate in the same rollback
-                # as playlist publication; acquisition failures never reach here.
-                if profile_id is not None and profile_file.exists():
-                    _move_without_overwrite(profile_file, previous_profile)
-                if cache_directory is not None and cache_directory.exists():
-                    cache_directory.rename(previous_cache)
-                for source, backup in backups:
-                    _move_without_overwrite(source, backup)
-                    archived.append((source, backup))
-                for source, destination in zip(staged, destinations):
-                    _move_without_overwrite(source, destination)
-                    published.append(destination)
-                if profile_id is not None:
-                    _move_without_overwrite(staged_profile, profile_file)
-                    published.append(profile_file)
-            except (OSError, KeyboardInterrupt):
-                for destination in published:
-                    destination.unlink()
-                for source, backup in reversed(archived):
-                    _move_without_overwrite(backup, source)
-                if previous_profile.exists():
-                    _move_without_overwrite(previous_profile, profile_file)
-                if previous_cache.exists():
-                    previous_cache.rename(cache_directory)
-                raise
-    except OSError:
-        raise AcquisitionError('Unable to publish playlist export; check input permissions') from None
-    return destinations

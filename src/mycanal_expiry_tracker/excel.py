@@ -2,12 +2,15 @@
 
 from datetime import date
 from pathlib import Path
+import os
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 from xlsxwriter.utility import xl_col_to_name
 
 from mycanal_expiry_tracker.expiration import days_remaining, paris_today
-from mycanal_expiry_tracker.tracker import ContentResult
+from mycanal_expiry_tracker.report import ReportRow
+from mycanal_expiry_tracker.cache import snapshot_data
 from mycanal_hodor_core.timing import timeit
 
 COLUMNS = ['Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
@@ -21,33 +24,7 @@ DAYS_FORMULA = (
 )
 
 
-def excel_duration(result: ContentResult) -> float | str:
-    item = result.item
-    if item.content_type == 'folder':
-        return (result.duration_minutes / 1440
-                if result.episodes_remaining is not None
-                and result.duration_minutes is not None else '')
-    # Playlist duration is current; the verified detail movie duration is a fallback.
-    minutes = item.movie_duration_minutes
-    if minutes is None:
-        minutes = result.duration_minutes
-        if (minutes is not None and item.content_type == 'VoD'
-                and item.duration_ms is not None and item.duration_ms >= 60_000):
-            minutes = item.duration_ms // 60_000
-    if minutes is None or minutes <= 0:
-        return ''
-    return minutes / 1440
-
-
-def season_category(numbers: tuple[int, ...]) -> str:
-    if len(numbers) == 1:
-        return f'Saison {numbers[0]}'
-    if all(right == left + 1 for left, right in zip(numbers, numbers[1:])):
-        return f'Saisons {numbers[0]} à {numbers[-1]}'
-    return 'Saisons ' + ', '.join(str(number) for number in numbers)
-
-
-def build_dataframe(results: list[ContentResult], today: date | None = None) -> pd.DataFrame:
+def build_dataframe(results: list[ReportRow], today: date | None = None) -> pd.DataFrame:
     today = today or paris_today()
     records = []
     # Preserve date ordering for legacy date-only results, and order timestamp
@@ -57,21 +34,19 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
         result.availability_end_date if result.availability_end_date is not None else float('-inf'),
     ))
     for result in results:
-        item = result.item
         records.append({
-            'Titre': item.title,
+            'Titre': result.title,
             'Sous-genre': result.subgenre,
-            'Service': item.service,
+            'Service': result.service,
             'Jours restants': days_remaining(result.expiration, today),
             "Disponible jusqu'au": result.availability_text,
             'Épisode à reprendre': result.resume_episode,
             'Épisodes restants': result.episodes_remaining,
-            'Durée': excel_duration(result),
-            'Catégorie': (season_category(result.season_numbers)
-                          if result.season_numbers else item.subtitle),
-            "Dans l'offre": None if item.in_offer is None else ('Oui' if item.in_offer else 'Non'),
-            'URL myCANAL': item.web_url,
-            'Content ID': item.content_id,
+            'Durée': result.duration_minutes / 1440 if result.duration_minutes is not None else '',
+            'Catégorie': result.category,
+            "Dans l'offre": None if result.in_offer is None else ('Oui' if result.in_offer else 'Non'),
+            'URL myCANAL': result.public_url,
+            'Content ID': result.content_id,
             'Fin de disponibilité': result.expiration,
             'Statut': result.status,
         })
@@ -82,9 +57,8 @@ def build_dataframe(results: list[ContentResult], today: date | None = None) -> 
                              kind='stable').reset_index(drop=True)
 
 
-@timeit()
-def write_excel(
-    results: list[ContentResult], path: Path, today: date | None = None,
+def _write_excel(
+    results: list[ReportRow], path: Path, today: date | None = None,
 ) -> pd.DataFrame:
     frame = build_dataframe(results, today)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,4 +114,16 @@ def write_excel(
                     'type': 'formula', 'criteria': '=' + formula,
                     'format': workbook.add_format(style),
                 })
+    return frame
+
+
+@timeit()
+def write_excel(results: list[ReportRow], path: Path, today: date | None = None,
+                *, secrets: tuple[str, ...] = ()) -> pd.DataFrame:
+    snapshot_data(results, secrets)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix='.excel-', dir=path.parent) as temporary:
+        staged = Path(temporary) / 'report.xlsx'
+        frame = _write_excel(results, staged, today)
+        os.replace(staged, path)
     return frame

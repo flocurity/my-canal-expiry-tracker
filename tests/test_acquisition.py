@@ -9,10 +9,9 @@ from structlog.testing import capture_logs
 
 from mycanal_expiry_tracker import cli as main
 from mycanal_expiry_tracker.acquisition import (
-    AcquisitionError, acquire_pages, parse_curl, publish_pages, read_curl,
+    AcquisitionError, acquire_pages, parse_curl, read_curl,
 )
 from mycanal_expiry_tracker.canal_api import CanalClient, DetailError
-from mycanal_expiry_tracker.playlist import load_playlist
 
 TOKEN = 'a' * 32
 AUTH = 'FAKE_AUTH_NOT_VALID'
@@ -59,45 +58,6 @@ def test_invalid_input_no_requests_or_files(cli, monkeypatch, command, reason):
     assert AUTH not in str(logs) and PROFILE not in str(logs) and TOKEN not in str(logs)
 
 
-@pytest.mark.parametrize('page_count', [1, 2, 5])
-def test_complete_acquisition_raw_files_and_loader(cli, page_count):
-    directory, api, _ = cli
-    (directory / 'history.json.bak').write_bytes(b'untouched')
-    pages = [raw_page(n < page_count, f'opaque+/={n}') for n in range(1, page_count + 1)]
-    api.fetch_playlist_page.side_effect = pages
-    with capture_logs() as logs:
-        assert main.main(['--curl']) == 0
-    assert api.fetch_playlist_page.call_count == page_count
-    for n, call in enumerate(api.fetch_playlist_page.call_args_list):
-        query = parse_qs(urlsplit(call.args[0]).query)
-        assert urlsplit(call.args[0]).path == f'/api/v2/mycanal/me/{TOKEN}/lists/playlist'
-        assert query == dict(maxContentRemaining=['500'], get=['100'],
-                             **({'after': [f'opaque+/={n}']} if n else {}))
-        assert call.args[1] == {'tokenPass': AUTH, 'xx-profile-id': PROFILE}
-    active = sorted(directory.glob('*.json'))
-    assert [p.read_bytes() for p in active] == pages
-    assert (directory / 'old.json.bak').read_bytes() == b'{"contents":[]}'
-    assert (directory / 'history.json.bak').read_bytes() == b'untouched'
-    assert load_playlist(directory) == []
-    assert (directory.parent / 'cache' / 'details.json').exists()
-    assert (directory.parent / 'output' / 'ma-liste-canal.xlsx').exists()
-    assert all(secret not in str(logs) for secret in (AUTH, PROFILE, TOKEN))
-    assert all(secret.encode() not in p.read_bytes() for secret in (AUTH, PROFILE, TOKEN)
-               for p in active)
-
-
-def test_timestamp_and_api_returned_url_tokens_are_preserved(tmp_path):
-    body = json.dumps({'contents': [], 'paging': {'hasNextPage': False},
-                       'url': URL}).encode()
-    api = Mock()
-    api.fetch_playlist_page.return_value = body
-    pages = acquire_pages(parse_curl(CURL), api)
-    paths = publish_pages(pages + [body], tmp_path,
-                          datetime(2026, 10, 1, 16, 42, tzinfo=timezone.utc))
-    assert [p.name for p in paths] == ['2026-10-01.18-42.json', '2026-10-01.18-42.page2.json']
-    assert [p.read_bytes() for p in paths] == [body, body]
-
-
 @pytest.mark.parametrize('responses', [
     [DetailError('HTTP 401')],
     [raw_page(True, 'one'), DetailError('HTTP 503')],
@@ -115,45 +75,6 @@ def test_failed_acquisition_preserves_old_export(cli, responses):
     assert main.main(['--curl']) == 1
     assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
     assert api.fetch_playlist_page.call_count == len(responses)
-
-
-@pytest.mark.parametrize('echo', [{'tokenPass': 'anything'}, {'xx-profile-id': 'anything'},
-                                 {'nested': [AUTH]}, {'nested': [PROFILE]}])
-def test_echoed_authentication_refused(cli, echo):
-    directory, api, _ = cli
-    payload = json.loads(raw_page())
-    payload.update(echo)
-    api.fetch_playlist_page.return_value = json.dumps(payload).encode()
-    with capture_logs() as logs:
-        assert main.main(['--curl']) == 1
-    assert AUTH not in str(logs) and PROFILE not in str(logs)
-    assert [p.name for p in directory.iterdir()] == ['old.json']
-
-
-def test_backup_collision_preserves_both_files(cli):
-    directory, api, _ = cli
-    (directory / 'old.json.bak').write_bytes(b'history')
-    api.fetch_playlist_page.return_value = raw_page()
-    assert main.main(['--curl']) == 1
-    assert (directory / 'old.json').read_bytes() == b'{"contents":[]}'
-    assert (directory / 'old.json.bak').read_bytes() == b'history'
-    assert len(list(directory.iterdir())) == 2
-
-
-def test_publish_failure_rolls_back(tmp_path, monkeypatch):
-    import mycanal_expiry_tracker.acquisition as acquisition
-    (tmp_path / 'old.json').write_bytes(b'old')
-    move = acquisition._move_without_overwrite
-
-    def fail_second_page(source, destination):
-        if destination.name.endswith('.page2.json'):
-            raise OSError('synthetic failure')
-        move(source, destination)
-
-    monkeypatch.setattr(acquisition, '_move_without_overwrite', fail_second_page)
-    with pytest.raises(AcquisitionError):
-        publish_pages([raw_page(), raw_page()], tmp_path)
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {'old.json': b'old'}
 
 
 @pytest.mark.parametrize('status', [401, 403])
@@ -198,56 +119,6 @@ def test_repeated_authentication_failure_is_not_retried_again():
         acquire_pages(context, client, authentication)
     authentication.ensure.assert_called_once_with(force=True)
     assert client.fetch_playlist_page.call_count == 2
-
-
-@pytest.mark.parametrize('secret', ['FAKE_PASS_ID', AUTH, 'NEW_FAKE_TOKEN'])
-def test_acquisition_refuses_all_authentication_secret_history(secret):
-    context = parse_curl(CURL)
-    authentication = Mock(headers=context.headers,
-                          secrets=['FAKE_PASS_ID', AUTH, 'NEW_FAKE_TOKEN'])
-    client = Mock()
-    client.fetch_playlist_page.return_value = json.dumps({
-        'contents': [], 'paging': {'hasNextPage': False}, 'echo': secret,
-    }).encode()
-    with pytest.raises(AcquisitionError, match='authentication data'):
-        acquire_pages(context, client, authentication)
-    authentication.ensure.assert_not_called()
-
-
-def test_publication_rolls_back_profile_and_whole_cache(tmp_path, monkeypatch):
-    import mycanal_expiry_tracker.acquisition as acquisition
-    directory = tmp_path / 'input'
-    directory.mkdir()
-    (directory / 'old.json').write_bytes(b'old')
-    metadata = directory / '.acquisition-profile'
-    metadata.write_text('{"profileId":"old"}')
-    cache = tmp_path / 'cache'
-    cache.mkdir()
-    (cache / 'details.json').write_bytes(b'old cache')
-    move = acquisition._move_without_overwrite
-
-    def fail_second(source, destination):
-        if destination.name.endswith('.page2.json'):
-            raise OSError('synthetic failure')
-        move(source, destination)
-
-    monkeypatch.setattr(acquisition, '_move_without_overwrite', fail_second)
-    with pytest.raises(AcquisitionError):
-        publish_pages([raw_page(), raw_page()], directory,
-                      profile_id='new', cache_directory=cache)
-    assert (directory / 'old.json').read_bytes() == b'old'
-    assert metadata.read_text() == '{"profileId":"old"}'
-    assert (cache / 'details.json').read_bytes() == b'old cache'
-
-
-def test_successful_profile_change_removes_entire_cache(tmp_path):
-    directory = tmp_path / 'input'
-    cache = tmp_path / 'cache'
-    (cache / 'nested').mkdir(parents=True)
-    (cache / 'nested' / 'old-data').write_bytes(b'private old data')
-    publish_pages([raw_page()], directory, profile_id='new', cache_directory=cache)
-    assert not cache.exists()
-    assert json.loads((directory / '.acquisition-profile').read_text()) == {'profileId': 'new'}
 
 
 def test_shared_transport_retries_without_sensitive_logging(monkeypatch):
@@ -308,3 +179,30 @@ def test_playlist_transport_rejects_other_resources(monkeypatch, path):
             client.fetch_playlist_page('https://hodor.canalplus.pro' + path,
                                        {'tokenPass': AUTH, 'xx-profile-id': PROFILE})
         get.assert_not_called()
+
+
+def test_pass_id_navigation_tokens_are_transient_not_rejected(tmp_path, fixture_data):
+    from mycanal_expiry_tracker.playlist import parse_playlist
+    from mycanal_expiry_tracker.cache import save_snapshot
+    from mycanal_expiry_tracker.report import to_report_rows
+    from mycanal_expiry_tracker.tracker import process_items
+
+    context = parse_curl(CURL)
+    authentication = Mock(headers=context.headers,
+                          secrets=['FAKE_PASS_ID', AUTH, PROFILE, TOKEN])
+    payload = fixture_data('playlist.json')
+    payload['contents'] = payload['contents'][:1]
+    payload['contents'][0]['onClick']['URLPage'] = (
+        f'https://hodor.canalplus.pro/api/v2/mycanal/detail/{TOKEN}/okapi/'
+        'fiction_50001.json?detailType=detailPage&objectType=unit')
+    payload['paging'] = {'hasNextPage': False}
+    payload['tokenPass'] = AUTH  # Discarded HTTP metadata is not persisted.
+    client = Mock(authentication=authentication)
+    client.fetch_playlist_page.return_value = json.dumps(payload).encode()
+    client.fetch.return_value = fixture_data('detail_movie.json')
+    pages = acquire_pages(context, client, authentication)
+    items = parse_playlist(pages)
+    rows = to_report_rows(process_items(items, client))
+    path = save_snapshot(rows, tmp_path, secrets=tuple(authentication.secrets))
+    assert all(secret not in path.read_text() for secret in (AUTH, PROFILE, TOKEN, 'FAKE_PASS_ID'))
+    assert len(list(tmp_path.iterdir())) == 1

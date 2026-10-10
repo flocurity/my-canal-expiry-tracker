@@ -1,154 +1,154 @@
+from dataclasses import replace
+from datetime import date, datetime, timezone
 import json
-from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
 
+import pandas as pd
 import pytest
 
-from mycanal_expiry_tracker.cache import DetailCache
-from mycanal_expiry_tracker.detail import DetailData
+from mycanal_expiry_tracker import cache
+from mycanal_expiry_tracker.cache import load_snapshot, save_snapshot
+from mycanal_expiry_tracker.excel import build_dataframe, write_excel
+from mycanal_expiry_tracker.report import to_report_rows
+from mycanal_expiry_tracker.tracker import ContentResult
 
 
-def test_cache_roundtrip_including_unknown(tmp_path, item):
-    path = tmp_path / 'cache' / 'details.json'
-    cache = DetailCache(path)
-    assert cache.get(item.content_id) is None
-    cache.put(item.content_id, DetailData(1793660340000))
-    cache.put('unknown', DetailData())
-    cache.save()
-    loaded = DetailCache(path)
-    assert loaded.get(item.content_id) == DetailData(1793660340000)
-    assert loaded.get('unknown') == DetailData()
-    assert not list(path.parent.glob('*.tmp'))
+@pytest.fixture
+def rows(item):
+    return to_report_rows([
+        ContentResult(replace(item, duration_ms=5880000), date(2026, 11, 2), 'OK',
+                      subgenre='Film Science-fiction', availability_text='lundi 2 novembre 23h59'),
+        ContentResult(replace(item, content_id='failed'), None, 'Erreur HTTP'),
+        ContentResult(replace(item, content_type='folder'), date(2026, 9, 30), 'OK',
+                      duration_minutes=84, resume_episode='Mammouth', episodes_remaining=4,
+                      season_numbers=(0, 3), availability_end_date=1790805540000),
+    ])
 
 
-@pytest.mark.parametrize('age', [timedelta(hours=25), timedelta(hours=-1)])
-def test_cache_has_no_ttl(tmp_path, age):
-    cache = DetailCache(tmp_path / 'details.json')
-    cache.put('id', DetailData())
-    cache.entries['id']['retrieved_at'] = (datetime.now(timezone.utc) - age).isoformat()
-    assert cache.get('id') == DetailData()
+def stamp(minute):
+    return datetime(2026, 10, 2, 13, minute, tzinfo=timezone.utc)
 
 
-@pytest.mark.parametrize('value', ['bad json', '[]', '{"id":null}', '{"id":{"retrieved_at":3}}'])
-def test_corrupt_cache_is_a_miss(tmp_path, value):
-    path = tmp_path / 'details.json'
-    path.write_text(value)
-    assert DetailCache(path).get('id') is None
-
-
-def test_malformed_entry(tmp_path):
-    cache = DetailCache(tmp_path / 'details.json')
-    cache.put('id', DetailData())
-    cache.entries['id']['availability_end_date'] = 'not-a-timestamp'
-    assert cache.get('id') is None
-    cache.put('', DetailData())
-    assert '' not in cache.entries
-
-
-def test_write_failure_is_recoverable(tmp_path, monkeypatch):
-    cache = DetailCache(tmp_path / 'details.json')
-    cache.put('id', DetailData())
-    monkeypatch.setattr('mycanal_expiry_tracker.cache.os.replace', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
-    cache.save()
-    assert not list(tmp_path.iterdir())
-
-
-@pytest.mark.parametrize('subgenre', [None, 3, False, [], {}, '', ' \t'])
-def test_unusable_cached_subgenre_keeps_date(tmp_path, subgenre):
-    cache = DetailCache(tmp_path / 'details.json')
-    cache.put('id', DetailData(1793660340000))
-    cache.entries['id']['subgenre'] = subgenre
-    assert cache.get('id') == DetailData(1793660340000)
-
-
-def test_cache_preserves_subgenre_verbatim(tmp_path):
-    path = tmp_path / 'details.json'
-    cache = DetailCache(path)
-    cache.put('id', DetailData(subgenre='  Science-FICTION / mystère  '))
-    cache.save()
-    assert DetailCache(path).get('id') == DetailData(subgenre='  Science-FICTION / mystère  ')
-
-
-def test_serialization_contains_only_raw_detail_enrichment(tmp_path):
-    path = tmp_path / 'details.json'
-    cache = DetailCache(path)
-    cache.put('fiction', DetailData(1790805540000, subgenre='Film Drame', duration_minutes=128))
-    cache.save()
-    entry = json.loads(path.read_text())['fiction']
-    assert entry == {
-        'retrieved_at': cache.entries['fiction']['retrieved_at'],
-        'availability_end_date': 1790805540000,
-        'subgenre': 'Film Drame',
-        'duration_minutes': 128,
-    }
-
-
-def test_loading_strips_obsolete_fields_even_from_unvisited_entries(tmp_path):
-    path = tmp_path / 'details.json'
-    path.write_text(json.dumps({
-        'old': {'url': 'https://old/token', 'expiration': '2026-09-30', 'status': 'OK'},
-        'new': {'retrieved_at': datetime.now(timezone.utc).isoformat(),
-                'availability_end_date': 1790805540000, 'url': 'https://old/token',
-                'duration': '98 min', 'title': 'not enrichment'},
-    }))
-    cache = DetailCache(path)
-    assert cache.get('old') is None
-    assert cache.get('new') == DetailData(1790805540000)
-    cache.save()
+def test_snapshot_alone_reproduces_partial_report(tmp_path, rows):
+    path = save_snapshot(rows, tmp_path, created_at=stamp(32))
+    assert path.name == '2026-10-02.15-32.cache.json'
+    restored = load_snapshot(tmp_path)
+    assert restored == rows
+    assert restored[1].status == 'Erreur HTTP'
+    assert restored[0].duration_minutes == 98
+    pd.testing.assert_frame_equal(build_dataframe(rows, date(2026, 10, 2)),
+                                  build_dataframe(restored, date(2026, 10, 2)))
     data = json.loads(path.read_text())
-    assert set(data) == {'new'}
-    assert set(data['new']) == {'retrieved_at', 'availability_end_date', 'subgenre'}
+    assert set(data) == {'schema_version', 'rows'}
+    for forbidden in ('detail_url', 'catalog', 'onClick', 'resume_fallback', 'user_progress'):
+        assert forbidden not in path.read_text()
 
 
-@pytest.mark.parametrize('value', [True, '1790805540000', float('inf'), [], {}, 10 ** 1000])
-def test_invalid_raw_timestamp_is_a_miss(tmp_path, value):
-    cache = DetailCache(tmp_path / 'details.json')
-    cache.put('id', DetailData())
-    cache.entries['id']['availability_end_date'] = value
-    assert cache.get('id') is None
+def test_archive_all_actives_and_select_latest_without_reading_backups(tmp_path, rows):
+    first = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = first.read_bytes()
+    second = save_snapshot([], tmp_path, created_at=stamp(32))
+    assert not first.exists()
+    assert first.with_name(first.name + '.bak').read_bytes() == original
+    assert load_snapshot(tmp_path) == []
+    # A manually left older active is ignored; backups may contain invalid data.
+    first.write_text('invalid older file')
+    first.with_name(first.name + '.bak').write_text('invalid backup')
+    assert load_snapshot(tmp_path) == []
+    second.write_text('invalid latest file')
+    with pytest.raises(ValueError, match='Invalid latest'):
+        load_snapshot(tmp_path)
 
 
-def test_missing_cache_has_no_failure_diagnostic(tmp_path):
-    from structlog.testing import capture_logs
-    with capture_logs() as logs:
-        cache = DetailCache(tmp_path / 'missing.json')
-    assert cache.entries == {}
-    assert not any('failure_debug' in entry['event'] for entry in logs)
+def test_no_active_does_not_use_legacy_or_backup(tmp_path):
+    (tmp_path / 'details.json').write_text('{}')
+    (tmp_path / '2026-10-02.15-32.cache.json.bak').write_text('{}')
+    with pytest.raises(ValueError, match='No active'):
+        load_snapshot(tmp_path)
 
 
-@pytest.mark.parametrize('number', [0, 1, -1, True, False, '0', 0.0, None, [], {}])
-def test_cached_season_number_contract(number):
-    from mycanal_hodor_core.episodes import Episode, Season, SeasonCatalog
-    from mycanal_expiry_tracker.catalog_cache import catalog_from_cache, catalog_to_cache
-    season = Season('season_mammouth', number)
-    catalog = SeasonCatalog(season, (season,), (
-        Episode('26219525_50006', 2621952550006, 21, None, 'Mammouth'),
-        Episode('unit_gptou', 2, 30, 1790805540000),
-    ))
-    raw = json.loads(json.dumps(catalog_to_cache(catalog)))
-    if type(number) is int and number >= 0:
-        assert catalog_from_cache(raw) == catalog
-        assert [e.content_id for e in catalog_from_cache(raw).episodes] == [
-            '26219525_50006', 'unit_gptou']
-    else:
-        with pytest.raises(ValueError, match='Invalid cached season'):
-            catalog_from_cache(raw)
+@pytest.mark.parametrize('collision', ['active', 'backup'])
+def test_collisions_never_overwrite(tmp_path, rows, collision):
+    path = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    if collision == 'backup':
+        path.with_name(path.name + '.bak').write_bytes(b'history')
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    with pytest.raises(ValueError, match='collision'):
+        save_snapshot([], tmp_path, created_at=stamp(31 if collision == 'active' else 32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
 
 
-def test_resume_fallback_cache_preserves_zero(tmp_path):
-    from mycanal_expiry_tracker.detail import ResumeFallback
-    path = tmp_path / 'details.json'
-    fallback = ResumeFallback('season_mammouth', 'unit_gptou', 0, 2)
-    cache = DetailCache(path)
-    cache.put('brand_mammouth', DetailData(resume_fallback=fallback))
-    cache.save()
-    assert DetailCache(path).get('brand_mammouth').resume_fallback == fallback
+@pytest.mark.parametrize('failure', [OSError('failed'), KeyboardInterrupt()])
+def test_publication_rolls_back_on_failure_or_interrupt(tmp_path, rows, monkeypatch, failure):
+    old = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = old.read_bytes()
+    move = cache._move_without_overwrite
+
+    def fail_publication(source, destination):
+        if destination.name == '2026-10-02.15-32.cache.json':
+            raise failure
+        move(source, destination)
+
+    monkeypatch.setattr(cache, '_move_without_overwrite', fail_publication)
+    with pytest.raises(type(failure)):
+        save_snapshot([], tmp_path, created_at=stamp(32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
 
 
-def test_zero_number_only_resume_fallback_survives_cache(tmp_path):
-    from mycanal_expiry_tracker.detail import ResumeFallback
-    path = tmp_path/'details.json'
-    fallback = ResumeFallback('season_mammouth', '', 1, 0)
-    cache = DetailCache(path)
-    cache.put('brand_mammouth', DetailData(resume_fallback=fallback))
-    cache.save()
-    assert DetailCache(path).get('brand_mammouth').resume_fallback == fallback
+def test_stage_failure_preserves_active(tmp_path, rows, monkeypatch):
+    old = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = old.read_bytes()
+    monkeypatch.setattr(cache.json, 'dumps', Mock(side_effect=OSError('disk full')))
+    with pytest.raises(OSError):
+        save_snapshot([], tmp_path, created_at=stamp(32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
+
+
+@pytest.mark.parametrize('field', ['title', 'service', 'category', 'subgenre', 'resume_episode', 'status', 'content_id'])
+@pytest.mark.parametrize('secret', ['FAKE_PASS_ID', 'FAKE_TOKEN_PASS', 'RETIRED_TOKEN', 'a' * 32])
+def test_secrets_refused_in_snapshot_and_excel(tmp_path, rows, field, secret):
+    unsafe = [replace(rows[0], **{field: 'prefix ' + secret + ' suffix'})]
+    secrets = ('FAKE_PASS_ID', 'FAKE_TOKEN_PASS', 'RETIRED_TOKEN')
+    with pytest.raises(ValueError, match='Authentication'):
+        save_snapshot(unsafe, tmp_path / 'cache', secrets=secrets)
+    with pytest.raises(ValueError, match='Authentication'):
+        write_excel(unsafe, tmp_path / 'report.xlsx', secrets=secrets)
+    assert not (tmp_path / 'report.xlsx').exists()
+    assert not (tmp_path / 'cache').exists()
+
+
+@pytest.mark.parametrize('url', ['https://hodor.canalplus.pro/private', 'https://evil.example/path',
+                                 'https://www.canalplus.com/?token=secret',
+                                 'https://www.canalplus.com/' + 'a' * 32,
+                                 'https://www.canalplus.com/%61' + 'a' * 31])
+def test_only_public_urls_persist(tmp_path, rows, url):
+    with pytest.raises(ValueError):
+        save_snapshot([replace(rows[0], public_url=url)], tmp_path)
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda data: data.update(schema_version=2),
+    lambda data: data.update(schema_version=True),
+    lambda data: data['rows'][0].update(duration_minutes=True),
+    lambda data: data['rows'][0].update(expiration='invalid'),
+    lambda data: data['rows'][0].update(availability_end_date=float('nan')),
+    lambda data: data['rows'][0].update(tokenPass='secret'),
+    lambda data: data['rows'][0].update(title='a' * 32),
+])
+def test_invalid_snapshot_fails_explicitly(tmp_path, rows, mutation):
+    path = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    data = json.loads(path.read_text())
+    mutation(data)
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match='Invalid latest'):
+        load_snapshot(tmp_path)
+
+
+def test_excel_failure_keeps_previous_workbook(tmp_path, rows, monkeypatch):
+    import mycanal_expiry_tracker.excel as excel
+    path = tmp_path / 'report.xlsx'
+    path.write_bytes(b'previous workbook')
+    monkeypatch.setattr(excel, '_write_excel', Mock(side_effect=OSError('failed')))
+    with pytest.raises(OSError):
+        write_excel(rows, path)
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {'report.xlsx': b'previous workbook'}

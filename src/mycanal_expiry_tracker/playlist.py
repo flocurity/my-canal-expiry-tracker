@@ -1,22 +1,21 @@
-"""Validate manually exported playlists before merging their usable entries."""
+"""Extract useful playlist fields from acquired pages in memory."""
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
-from mycanal_hodor_core.diagnostics import debug_failure
 from mycanal_hodor_core.logging import get_logger
+from mycanal_hodor_core.diagnostics import redact
 from mycanal_hodor_core.timing import timeit
 
 from mycanal_hodor_core.episodes import season_number, episode_number
 from mycanal_hodor_core.detail import declares_detail_v5 as _declares_detail_v5
+from .security import public_url
 
 log = get_logger(__name__)
 
 
 class PlaylistError(ValueError):
-    """One or more playlist files cannot be processed."""
+    """Acquired playlist pages cannot be processed."""
 
 
 @dataclass(frozen=True)
@@ -46,69 +45,37 @@ class PlaylistItem:
         return None
 
     @property
-    def season_content_id(self) -> str:
-        # A playlist brand ID can point to different seasons across exports.
-        try:
-            parsed = urlsplit(self.detail_url)
-            if parse_qs(parsed.query).get('detailType') == ['detailSeason']:
-                return Path(parsed.path).stem
-        except ValueError:
-            pass
-        return ''
-
-    @property
     def web_url(self) -> str:
-        # Do not let protocol-relative or malformed paths change the link host.
-        if self.path.startswith('/') and not self.path.startswith('//'):
-            if not any(char.isspace() or char == '\\' for char in self.path):
-                return 'https://www.canalplus.com' + self.path
-        try:
-            parsed = urlsplit(self.detail_url)
-            if parsed.scheme == 'https' and parsed.hostname:
-                return self.detail_url
-        except ValueError:
-            pass
-        return ''
+        return public_url(self.path)
+
 
 
 def _text(value: object) -> str:
     return value if isinstance(value, str) else ''
 
 
-def _positive_number(value: object) -> int | None:
-    return value if type(value) is int and value > 0 else None
-
 
 @timeit()
-def load_playlist(directory: Path) -> list[PlaylistItem]:
-    paths = sorted(directory.glob('*.json'))
-    if not paths:
-        raise PlaylistError(f'No .json playlist files found in {directory}')
-
-    pages = []
-    errors = []
-    for path in paths:
+def parse_playlist(pages: list[bytes], *, secrets: tuple[str, ...] = ()) -> list[PlaylistItem]:
+    contents = []
+    for raw in pages:
         try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-            if not isinstance(data, dict) or not isinstance(data.get('contents'), list):
-                raise ValueError('Expected an object containing a contents array')
-            pages.append(data['contents'])
-        except (OSError, ValueError) as exc:
-            errors.append(f'{path}: {exc}')
-            debug_failure(log, 'playlist_parsing_debug', exc, path=str(path))
-    if errors:
-        raise PlaylistError('\n'.join(errors))
-
+            data = json.loads(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            raise PlaylistError('Invalid playlist JSON') from None
+        if not isinstance(data, dict) or not isinstance(data.get('contents'), list):
+            raise PlaylistError('Expected an object containing a contents array')
+        contents.append(data['contents'])
     items = []
     seen = set()
-    for page in pages:
+    for page in contents:
         for raw in page:
             if not isinstance(raw, dict):
                 log.warning('playlist_item_skipped', reason='Item is not an object')
                 continue
             click = raw.get('onClick')
             if not isinstance(click, dict) or not _text(click.get('URLPage')).strip():
-                log.warning('playlist_item_skipped', content_id=raw.get('contentID'),
+                log.warning('playlist_item_skipped', content_id=redact(_text(raw.get('contentID')), secrets),
                             reason='Missing detail URL')
                 continue
             content_id = _text(raw.get('contentID'))
@@ -138,5 +105,5 @@ def load_playlist(directory: Path) -> list[PlaylistItem]:
                 duration_ms=(duration if isinstance(duration, int)
                              and not isinstance(duration, bool) and duration > 0 else None),
             ))
-    log.info('playlist_loaded', files=len(paths), items=len(items))
+    log.info('playlist_loaded', pages=len(pages), items=len(items))
     return items

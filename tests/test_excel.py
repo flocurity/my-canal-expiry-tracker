@@ -1,3 +1,4 @@
+from mycanal_expiry_tracker.report import to_report_rows
 from dataclasses import replace
 from datetime import date, timedelta
 from xml.etree import ElementTree as ET
@@ -15,10 +16,10 @@ def test_sorting_and_recalculation(item):
     results = [ContentResult(item, None, 'Date inconnue'),
                ContentResult(item, date(2026, 11, 2), 'OK'),
                ContentResult(item, date(2026, 10, 1), 'OK')]
-    frame = build_dataframe(results, date(2026, 10, 1))
+    frame = build_dataframe(to_report_rows(results), date(2026, 10, 1))
     assert frame['Fin de disponibilité'].tolist() == [date(2026, 10, 1), date(2026, 11, 2), None]
     assert frame['Jours restants'].iloc[:2].tolist() == [0, 32]
-    assert build_dataframe(results, date(2026, 10, 2))['Jours restants'].iloc[0] == -1
+    assert build_dataframe(to_report_rows(results), date(2026, 10, 2))['Jours restants'].iloc[0] == -1
 
 
 def test_excel_native_features_and_untrusted_text(tmp_path, item):
@@ -28,7 +29,7 @@ def test_excel_native_features_and_untrusted_text(tmp_path, item):
                for i in [-1, 0, 2, 3, 7, 8, 30, 31]]
     results.append(ContentResult(item, None, 'Date inconnue'))
     path = tmp_path / 'report.xlsx'
-    write_excel(results, path, today)
+    write_excel(to_report_rows(results), path, today)
     with ZipFile(path) as book:
         sheet = ET.fromstring(book.read('xl/worksheets/sheet1.xml'))
         table = ET.fromstring(book.read('xl/tables/table1.xml'))
@@ -78,7 +79,7 @@ def test_excel_native_features_and_untrusted_text(tmp_path, item):
 
 def test_empty_export_has_table(tmp_path):
     path = tmp_path / 'empty.xlsx'
-    write_excel([], path)
+    write_excel(to_report_rows([]), path)
     with ZipFile(path) as book:
         table = ET.fromstring(book.read('xl/tables/table1.xml'))
         assert table.attrib['ref'] == 'A1:N2'
@@ -88,7 +89,7 @@ def test_subgenre_column_preserves_duplicate_category(tmp_path, item):
     results = [ContentResult(item, None, 'Date inconnue', item.subtitle),
                ContentResult(item, None, 'Date inconnue')]
     path = tmp_path / 'subgenre.xlsx'
-    frame = write_excel(results, path)
+    frame = write_excel(to_report_rows(results), path)
     assert frame.columns.tolist() == [
         'Titre', 'Sous-genre', 'Service', 'Jours restants', "Disponible jusqu'au",
         'Épisode à reprendre', 'Épisodes restants', 'Durée', 'Catégorie', "Dans l'offre", 'URL myCANAL', 'Content ID',
@@ -112,7 +113,7 @@ def test_duration_is_numeric_and_availability_is_text(tmp_path, item):
     result = ContentResult(item, date(2026, 9, 30), 'OK', duration_minutes=107,
                            availability_text='mercredi 30 septembre 23h59')
     path = tmp_path / 'presentation.xlsx'
-    frame = write_excel([result], path)
+    frame = write_excel(to_report_rows([result]), path)
     assert frame['Durée'].tolist() == [107 / 1440]
     assert frame["Disponible jusqu'au"].tolist() == ['mercredi 30 septembre 23h59']
     with ZipFile(path) as book:
@@ -138,12 +139,12 @@ def test_playlist_duration_has_priority_and_folders_stay_empty(item):
     folder = replace(movie, content_type='folder')
     results = [ContentResult(movie, None, 'Date inconnue', duration_minutes=133),
                ContentResult(folder, None, 'Date inconnue', duration_minutes=133)]
-    assert build_dataframe(results)['Durée'].tolist() == [98 / 1440, '']
+    assert build_dataframe(to_report_rows(results))['Durée'].tolist() == [98 / 1440, '']
 
 
 def test_non_movie_playlist_duration_is_not_used(item):
     documentary = replace(item, subtitle='Doc. Nature', duration_ms=5880000)
-    assert build_dataframe([ContentResult(documentary, None, 'Date inconnue')])['Durée'].iloc[0] == ''
+    assert build_dataframe(to_report_rows([ContentResult(documentary, None, 'Date inconnue')]))['Durée'].iloc[0] == ''
 
 
 def test_series_backlog_columns_and_numeric_duration(tmp_path, item):
@@ -152,7 +153,7 @@ def test_series_backlog_columns_and_numeric_duration(tmp_path, item):
                              resume_episode='S3E3', episodes_remaining=27),
                ContentResult(item, None, 'Date inconnue')]
     path = tmp_path / 'series.xlsx'
-    frame = write_excel(results, path)
+    frame = write_excel(to_report_rows(results), path)
     assert frame['Épisode à reprendre'].tolist() == ['S3E3', '']
     assert frame['Épisodes restants'].iloc[0] == 27
     with ZipFile(path) as book:
