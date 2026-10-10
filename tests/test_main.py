@@ -197,6 +197,7 @@ def test_curl_uses_same_fresh_pipeline_without_keyring(tmp_path, runtime, monkey
     monkeypatch.setattr(cli, 'read_curl', lambda: 'synthetic curl')
     monkeypatch.setattr(cli, 'parse_curl', lambda _: HodorRuntimeContext('a' * 32, 'FAKE_AUTH', '42'))
     assert cli.main(['--curl', '--delay', '0'], data_dir=tmp_path) == 0
+    assert cli.CanalClient.call_args.kwargs['diagnostic_secrets'] == ('a' * 32, 'FAKE_AUTH')
     assert len(load_snapshot(tmp_path / 'cache')) == 2
 
 

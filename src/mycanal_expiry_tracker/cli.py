@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
                 context = authentication.bootstrap()
             diagnostic_secrets = (tuple(authentication.secrets) if authentication is not None
                                   else (context.hodor_token, context.token_pass))
-            with CanalClient(delay=delay) as client:
+            with CanalClient(delay=delay, diagnostic_secrets=diagnostic_secrets) as client:
                 client.authentication = authentication
                 pages = acquire_pages(context, client, authentication)
                 if authentication is not None:
