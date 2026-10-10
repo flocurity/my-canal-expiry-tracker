@@ -180,6 +180,23 @@ def test_excel_failure_leaves_regenerable_snapshot(tmp_path, runtime, monkeypatc
     assert len(load_snapshot(tmp_path / 'cache')) == 2
 
 
+def test_real_xlsxwriter_file_creation_error_is_handled(tmp_path, runtime, monkeypatch):
+    import xlsxwriter.workbook
+
+    destination = tmp_path / 'output' / 'ma-liste-canal.xlsx'
+    destination.parent.mkdir()
+    destination.write_bytes(b'previous workbook')
+    monkeypatch.setattr(xlsxwriter.workbook, 'ZipFile',
+                        Mock(side_effect=PermissionError('synthetic write denied')))
+    with capture_logs() as logs:
+        assert cli.main([], data_dir=tmp_path) == 1
+    assert destination.read_bytes() == b'previous workbook'
+    assert list(destination.parent.iterdir()) == [destination]
+    assert len(load_snapshot(tmp_path / 'cache')) == 2
+    assert any(entry['event'] == 'execution_failed' for entry in logs)
+    assert any(entry.get('exception_type') == 'FileCreateError' for entry in logs)
+
+
 def test_credentials_in_selected_business_data_refuse_all_publication(tmp_path, runtime, monkeypatch):
     pages = json.loads(cli.acquire_pages.return_value[0])
     pages['contents'][0]['title'] = 'FAKE_PASS_ID'

@@ -3,6 +3,7 @@ import argparse
 import math
 from collections import Counter
 from pathlib import Path
+from xlsxwriter.exceptions import FileCreateError
 
 from mycanal_hodor_core.diagnostics import debug_failure, redact
 from mycanal_hodor_core.authentication import PassIdAuth, vault, profile_path
@@ -88,7 +89,7 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
             log.info('snapshot_saved', path=str(snapshot), rows=len(rows))
         destination = workdir / 'output' / 'ma-liste-canal.xlsx'
         write_excel(rows, destination, secrets=persistence_secrets)
-    except (AcquisitionError, BootstrapError, DetailError, OSError, ValueError) as exc:
+    except (AcquisitionError, BootstrapError, DetailError, FileCreateError, OSError, ValueError) as exc:
         if authentication is not None:
             diagnostic_secrets = tuple(authentication.secrets)
         log.error('execution_failed', reason=redact(str(exc), diagnostic_secrets))
