@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
                     pass_id, profile_file=profile_path('mycanal-expiry-tracker'))
                 context = authentication.bootstrap()
             diagnostic_secrets = (tuple(authentication.secrets) if authentication is not None
-                                  else (context.hodor_token, context.token_pass, context.profile_id))
+                                  else (context.hodor_token, context.token_pass))
             with CanalClient(delay=delay) as client:
                 client.authentication = authentication
                 pages = acquire_pages(context, client, authentication)
@@ -81,10 +81,7 @@ def main(argv: list[str] | None = None, *, data_dir: Path | None = None) -> int:
             rows = to_report_rows(results)
             diagnostic_secrets = (tuple(authentication.secrets) if authentication is not None
                                   else diagnostic_secrets)
-            # A profile ID is structured metadata, not a credential substring:
-            # short numeric IDs legitimately occur in dates, titles and counts.
-            persistence_secrets = tuple(secret for secret in diagnostic_secrets
-                                        if secret != context.profile_id) + (context.token_pass,)
+            persistence_secrets = diagnostic_secrets + (context.token_pass,)
             if authentication is not None:
                 persistence_secrets += (pass_id, authentication.headers['tokenPass'])
             snapshot = save_snapshot(rows, workdir / 'cache', secrets=persistence_secrets)

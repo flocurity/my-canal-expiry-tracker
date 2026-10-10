@@ -22,7 +22,7 @@ def runtime(tmp_path, monkeypatch, fixture_data):
     # Realistic navigation token must stay transient, unlike report metadata.
     playlist['contents'][0]['onClick']['URLPage'] = playlist['contents'][0]['onClick']['URLPage'].replace('/fiction/', '/' + 'a' * 32 + '/')
     context = HodorRuntimeContext('a' * 32, 'FAKE_AUTH', '42')
-    authentication = Mock(headers=context.headers, secrets=['FAKE_PASS_ID', 'FAKE_AUTH', '42', 'a' * 32])
+    authentication = Mock(headers=context.headers, secrets=['FAKE_PASS_ID', 'FAKE_AUTH', 'a' * 32])
     authentication.bootstrap.return_value = context
     monkeypatch.setattr(cli, 'vault', Mock(return_value='FAKE_PASS_ID'))
     monkeypatch.setattr(cli, 'PassIdAuth', Mock(return_value=authentication))
@@ -37,6 +37,48 @@ def runtime(tmp_path, monkeypatch, fixture_data):
     manager.__exit__ = Mock(return_value=False)
     monkeypatch.setattr(cli, 'CanalClient', Mock(return_value=manager))
     return client, authentication
+
+
+@pytest.mark.parametrize('profile_id', ['0', '42'])
+@pytest.mark.parametrize('curl', [False, True])
+def test_profile_is_context_not_a_diagnostic_or_persistence_secret(
+        tmp_path, runtime, monkeypatch, profile_id, curl):
+    _, authentication = runtime
+    context = HodorRuntimeContext('a' * 32, 'FAKE_AUTH', profile_id)
+    authentication.headers = context.headers
+    authentication.bootstrap.return_value = context
+    monkeypatch.setattr(cli, 'read_curl', lambda: 'synthetic curl')
+    monkeypatch.setattr(cli, 'parse_curl', lambda _: context)
+    payload = json.loads(cli.acquire_pages.return_value[0])
+    title = 'Film 2000, 1942, 2042-10-10, HTTP 200/429'
+    payload['contents'][0].update(title=title, contentID='42_50001')
+    cli.acquire_pages.return_value = [json.dumps(payload).encode()]
+    process = Mock(wraps=cli.process_items)
+    save = Mock(wraps=cli.save_snapshot)
+    monkeypatch.setattr(cli, 'process_items', process)
+    monkeypatch.setattr(cli, 'save_snapshot', save)
+    with capture_logs() as logs:
+        assert cli.main(['--curl'] if curl else [], data_dir=tmp_path) == 0
+    assert profile_id not in process.call_args.kwargs['secrets']
+    assert profile_id not in save.call_args.kwargs['secrets']
+    assert 'FAKE_AUTH' in save.call_args.kwargs['secrets']
+    assert load_snapshot(tmp_path / 'cache')[0].title == title
+    assert title in str(logs)
+    assert cli.acquire_pages.call_args.args[0].profile_id == profile_id
+
+
+def test_credential_equal_to_profile_id_is_still_protected(tmp_path, runtime, monkeypatch):
+    _, authentication = runtime
+    context = HodorRuntimeContext('a' * 32, 'FAKE_AUTH', '0')
+    authentication.headers = context.headers
+    authentication.secrets = ['0', 'FAKE_AUTH', 'a' * 32]
+    authentication.bootstrap.return_value = context
+    monkeypatch.setattr(cli, 'vault', lambda _: '0')
+    payload = json.loads(cli.acquire_pages.return_value[0])
+    payload['contents'][0]['title'] = 'Film 2000'
+    cli.acquire_pages.return_value = [json.dumps(payload).encode()]
+    assert cli.main([], data_dir=tmp_path) == 1
+    assert not (tmp_path / 'cache').exists()
 
 
 def test_normal_never_reads_old_cache_or_input_and_refetches(tmp_path, runtime, monkeypatch):

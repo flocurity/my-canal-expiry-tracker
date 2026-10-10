@@ -38,7 +38,8 @@ Protect the actual report/snapshot data at persistence boundaries: reject creden
 including token history and Hodor path tokens. Profile IDs are structured auth
 metadata, not forbidden substrings in unrelated business text. Retain only validated
 HTTPS `www.canalplus.com` URLs without query/fragment; remove Hodor URL fallbacks.
-Keep Core log redaction unchanged.
+Keep Core's structural redaction rules; profile IDs are excluded from credential
+registries used by diagnostics and persistence.
 
 ## Project structure and ownership
 
