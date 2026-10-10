@@ -104,6 +104,70 @@ def test_stage_failure_preserves_active(tmp_path, rows, monkeypatch):
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
 
 
+def test_interrupt_immediately_after_archival_restores_active(tmp_path, rows, monkeypatch):
+    old = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = old.read_bytes()
+    move = cache._move_without_overwrite
+
+    def interrupt_after_archive(source, destination):
+        move(source, destination)
+        if destination.name.endswith('.bak'):
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cache, '_move_without_overwrite', interrupt_after_archive)
+    with pytest.raises(KeyboardInterrupt):
+        save_snapshot([], tmp_path, created_at=stamp(32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
+
+
+@pytest.mark.parametrize('phase', ['archive', 'publish'])
+def test_interrupt_immediately_after_link_preserves_active(tmp_path, rows, monkeypatch, phase):
+    old = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = old.read_bytes()
+    link = cache.os.link
+
+    def interrupt_after_link(source, destination):
+        link(source, destination)
+        if (phase == 'archive' and destination.name.endswith('.bak')
+                or phase == 'publish' and destination.name == '2026-10-02.15-32.cache.json'):
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cache.os, 'link', interrupt_after_link)
+    with pytest.raises(KeyboardInterrupt):
+        save_snapshot([], tmp_path, created_at=stamp(32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
+
+
+def test_move_collision_preserves_both_files(tmp_path):
+    source = tmp_path / 'source'
+    destination = tmp_path / 'destination'
+    source.write_bytes(b'active')
+    destination.write_bytes(b'history')
+    with pytest.raises(FileExistsError):
+        cache._move_without_overwrite(source, destination)
+    assert source.read_bytes() == b'active'
+    assert destination.read_bytes() == b'history'
+
+
+def test_interrupt_after_archive_source_unlink_restores_active(tmp_path, rows, monkeypatch):
+    old = save_snapshot(rows, tmp_path, created_at=stamp(31))
+    original = old.read_bytes()
+    unlink = cache.Path.unlink
+    interrupted = False
+
+    def interrupt_after_unlink(path, *args, **kwargs):
+        nonlocal interrupted
+        unlink(path, *args, **kwargs)
+        if path == old and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cache.Path, 'unlink', interrupt_after_unlink)
+    with pytest.raises(KeyboardInterrupt):
+        save_snapshot([], tmp_path, created_at=stamp(32))
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == {old.name: original}
+
+
 @pytest.mark.parametrize('field', ['title', 'service', 'category', 'subgenre', 'resume_episode', 'status', 'content_id'])
 @pytest.mark.parametrize('secret', ['FAKE_PASS_ID', 'FAKE_TOKEN_PASS', 'RETIRED_TOKEN', 'a' * 32])
 def test_secrets_refused_in_snapshot_and_excel(tmp_path, rows, field, secret):

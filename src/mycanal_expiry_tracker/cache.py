@@ -85,11 +85,14 @@ def load_snapshot(directory: Path) -> list[ReportRow]:
 
 
 def _move_without_overwrite(source: Path, destination: Path) -> None:
-    os.link(source, destination)
     try:
+        os.link(source, destination)
         source.unlink()
     except BaseException:
-        destination.unlink()
+        # A link can succeed immediately before an interruption. Remove it only
+        # while the source still holds the data, and never remove a collision.
+        if source.exists() and destination.exists() and source.samefile(destination):
+            destination.unlink()
         raise
 
 
@@ -116,11 +119,15 @@ def save_snapshot(rows: list[ReportRow], directory: Path, *,
                           encoding='utf-8')
         try:
             for source, backup in backups:
-                _move_without_overwrite(source, backup)
                 archived.append((source, backup))
+                _move_without_overwrite(source, backup)
             _move_without_overwrite(staged, destination)
         except (OSError, KeyboardInterrupt):
             for source, backup in reversed(archived):
-                _move_without_overwrite(backup, source)
+                if backup.exists():
+                    if not source.exists():
+                        _move_without_overwrite(backup, source)
+                    elif source.samefile(backup):
+                        backup.unlink()
             raise
     return destination
