@@ -165,7 +165,7 @@ def test_incomplete_series_never_presents_complete_totals(tmp_path, series, clie
     elif problem == 'previous_page':
         payload['episodes']['paging']['hasPreviousPage'] = True
     elif problem == 'coordinates':
-        del payload['episodes']['contents'][0]['episodeNumber']
+        payload['episodes']['contents'][0]['episodeNumber'] = -1
     elif problem == 'duplicates':
         payload['episodes']['contents'].append(payload['episodes']['contents'][0])
     else:

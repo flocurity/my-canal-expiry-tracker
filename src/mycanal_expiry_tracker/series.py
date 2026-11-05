@@ -31,7 +31,7 @@ def is_synthetic_episode_number(episode: Episode) -> bool:
 
 
 def _episode_label(season_number: int, episode: Episode) -> str:
-    if not is_synthetic_episode_number(episode):
+    if episode.number is not None and not is_synthetic_episode_number(episode):
         return f'S{season_number}E{episode.number}'
     if episode.title and episode.title.strip():
         return episode.title
